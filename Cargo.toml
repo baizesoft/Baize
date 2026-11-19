@@ -1,0 +1,8 @@
+﻿[package]
+name = "baize-seed"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bzseed"
+path = "src/main.rs"
