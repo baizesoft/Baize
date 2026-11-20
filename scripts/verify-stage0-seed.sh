@@ -37,8 +37,34 @@ fi
 check_status "$work/first" 25
 check_status "$work/second" 9
 
+# 全局状态、嵌套分支、比较和循环都由生成的机器码执行。
+cat > "$work/control.bz" <<'BZ'
+整数 序号 = 0
+整数 总和 = 0
+当(序号 < 6) {
+如果(序号 >= 3) {
+总和 = 总和 + 序号
+} 否则 {
+总和 = 总和 - 1
+}
+序号 = 序号 + 1
+}
+当(序号 < 6) { 返回 99 }
+如果(-3 <= -2) {
+如果(序号 == 6) {
+如果(序号 != 7) { 返回 总和 }
+}
+}
+返回 1
+BZ
+compile "$work/control.bz" "$work/control"
+check_status "$work/control" 9
+sed 's/序号 < 6/序号 < 5/g; s/序号 == 6/序号 == 5/' "$work/control.bz" > "$work/variant.bz"
+compile "$work/variant.bz" "$work/variant"
+check_status "$work/variant" 4
+
 # EOF、括号不匹配、溢出的字面量及语句尾部多余输入。
-for source in '返回' '返回 (1 + 2' '返回 9223372036854775808' '返回 7 值'; do
+for source in '返回' '返回 (1 + 2' '返回 9223372036854775808' '返回 7 值' '返回 未声明' '未声明 = 1' '如果(1) {' '返回 1 }'; do
   printf '%s\n' "$source" > "$work/invalid.bz"
   if compile "$work/invalid.bz" "$work/invalid" 2> "$work/error"; then
     printf '种子错误地接受了 %s\n' "$source" >&2
