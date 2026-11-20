@@ -63,8 +63,60 @@ sed 's/序号 < 6/序号 < 5/g; s/序号 == 6/序号 == 5/' "$work/control.bz" >
 compile "$work/variant.bz" "$work/variant"
 check_status "$work/variant" 4
 
+# 分离的零填充段、跨 64 KiB 的数组和单字节截断。
+cat > "$work/array.bz" <<'BZ'
+字节数组 源[70000]
+字节数组 结果[3]
+整数 游标 = 69999
+如果(源[游标] != 0) { 返回 1 }
+源[游标] = 300
+结果[2] = 源[游标] + 3
+如果(源[0] != 0) { 返回 2 }
+如果(结果[0] != 0) { 返回 3 }
+返回 结果[2]
+BZ
+compile "$work/array.bz" "$work/array"
+readelf -lW "$work/array" > "$work/segments"
+grep -Eq 'LOAD .* RW ' "$work/segments"
+check_status "$work/array" 47
+sed 's/300/315/' "$work/array.bz" > "$work/array-variant.bz"
+compile "$work/array-variant.bz" "$work/array-variant"
+check_status "$work/array-variant" 62
+
+# 使用进程参数获取文件路径，逐字节变换实际输入后写回。
+cat > "$work/io.bz" <<'BZ'
+字节数组 输入路径[260]
+字节数组 输出路径[260]
+字节数组 数据[64]
+整数 长度 = 0
+整数 游标 = 0
+整数 暂存 = 0
+如果(参数数量() != 2) { 返回 2 }
+暂存 = 参数读取(0, 输入路径, 260)
+暂存 = 参数读取(1, 输出路径, 260)
+长度 = 文件读取(输入路径, 数据, 64)
+如果(长度 < 0) { 返回 3 }
+当(游标 < 长度) {
+数据[游标] = 数据[游标] + 1
+游标 = 游标 + 1
+}
+如果(文件写入(输出路径, 数据, 长度) != 长度) { 返回 4 }
+输出(长度)
+输出(-120)
+BZ
+compile "$work/io.bz" "$work/io"
+printf '\000\012\377' > "$work/输入"
+printf '\001\013\000' > "$work/expected-io"
+printf '3\n-120\n' > "$work/expected-stdout"
+env -i PATH= "$work/io" "$work/输入" "$work/result" > "$work/stdout"
+cmp "$work/expected-io" "$work/result"
+cmp "$work/expected-stdout" "$work/stdout"
+status=0
+env -i PATH= "$work/io" "$work/missing" "$work/unexpected" || status=$?
+[[ $status == 3 && ! -e $work/unexpected ]]
+
 # EOF、括号不匹配、溢出的字面量及语句尾部多余输入。
-for source in '返回' '返回 (1 + 2' '返回 9223372036854775808' '返回 7 值' '返回 未声明' '未声明 = 1' '如果(1) {' '返回 1 }'; do
+for source in '返回' '返回 (1 + 2' '返回 9223372036854775808' '返回 7 值' '返回 未声明' '未声明 = 1' '如果(1) {' '返回 1 }' '字节数组 结果[0]' '字节数组 结果[16777217]' '字节数组 结果[2' '返回 参数数量(1)' '返回 未声明()'; do
   printf '%s\n' "$source" > "$work/invalid.bz"
   if compile "$work/invalid.bz" "$work/invalid" 2> "$work/error"; then
     printf '种子错误地接受了 %s\n' "$source" >&2
