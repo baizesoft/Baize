@@ -14,6 +14,10 @@ seed.s 是手写的白泽子集编译器，读取白泽源码并直接生成静�
 
 从已有白泽编译器出发，运行 bash scripts/check-stage0-no-ld.sh 已有白泽编译器。该流程用 GNU as 产生目标文件，再由白泽打包器生成种子，后续三代原生自举在移除 ld 的环境中验收。契约见 bootstrap/stage0/ELF打包契约.md。
 
+## 白泽汇编器
+
+从已有白泽编译器出发，运行 bash scripts/check-stage0-no-binutils.sh 已有白泽编译器。该流程用白泽汇编器读取原始 seed.s，再用白泽 ELF 打包器构建种子。支持的指令和语法见 bootstrap/stage0/汇编器子集.md。
+
 ## 当前子集
 
 - UTF-8 源码中的中文标识符和关键字、ASCII 标点、注释及十进制字面量。
