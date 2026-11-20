@@ -102,12 +102,13 @@ cat > "$work/io.bz" <<'BZ'
 }
 如果(文件写入(输出路径, 数据, 长度) != 长度) { 返回 4 }
 输出(长度)
-输出(-120)
+输出("中文\t文本")
+输出(-120 / 7)
 BZ
 compile "$work/io.bz" "$work/io"
 printf '\000\012\377' > "$work/输入"
 printf '\001\013\000' > "$work/expected-io"
-printf '3\n-120\n' > "$work/expected-stdout"
+printf '3\n中文\t文本\n-17\n' > "$work/expected-stdout"
 env -i PATH= "$work/io" "$work/输入" "$work/result" > "$work/stdout"
 cmp "$work/expected-io" "$work/result"
 cmp "$work/expected-stdout" "$work/stdout"
@@ -115,8 +116,23 @@ status=0
 env -i PATH= "$work/io" "$work/missing" "$work/unexpected" || status=$?
 [[ $status == 3 && ! -e $work/unexpected ]]
 
+# 向前引用、递归、参数顺序、局部变量及全局变量遮蔽。
+cat > "$work/function.bz" <<'BZ'
+整数 数 = 7
+返回 聚合(4, 1) + 数
+函数 聚合(数, 基数) {
+整数 中间 = 数 * 基数
+如果(数 <= 1) { 返回 中间 }
+返回 中间 + 聚合(数 - 1, 基数 + 1)
+}
+BZ
+compile "$work/function.bz" "$work/function"
+check_status "$work/function" 27
+bash "$root/scripts/verify-stage0-boundary.sh" "$work/seed"
+
 # EOF、括号不匹配、溢出的字面量及语句尾部多余输入。
-for source in '返回' '返回 (1 + 2' '返回 9223372036854775808' '返回 7 值' '返回 未声明' '未声明 = 1' '如果(1) {' '返回 1 }' '字节数组 结果[0]' '字节数组 结果[16777217]' '字节数组 结果[2' '返回 参数数量(1)' '返回 未声明()'; do
+for source in '返回' '返回 (1 + 2' '返回 9223372036854775808' '返回 7 值' '返回 未声明' '未声明 = 1' '如果(1) {' '返回 1 }' '字节数组 结果[0]' '字节数组 结果[16777217]' '字节数组 结果[2' '返回 参数数量(1)' '返回 未声明()' '返回 参数读取(0)' '返回 调用(1)
+函数 调用() { 返回 1 }'; do
   printf '%s\n' "$source" > "$work/invalid.bz"
   if compile "$work/invalid.bz" "$work/invalid" 2> "$work/error"; then
     printf '种子错误地接受了 %s\n' "$source" >&2
@@ -128,7 +144,7 @@ done
 
 printf '返回 7\n' > "$work/limit.bz"
 size=$(wc -c < "$work/limit.bz")
-printf '%*s' "$((65536 - size))" '' >> "$work/limit.bz"
+printf '%*s' "$((262144 - size))" '' >> "$work/limit.bz"
 compile "$work/limit.bz" "$work/limit"
 check_status "$work/limit" 7
 printf ' ' >> "$work/limit.bz"

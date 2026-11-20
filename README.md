@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-bootstrap.ps1
 
 ## Linux x86-64 原生自举
 
-白泽编译器可直接生成静态 ELF。以 Rust 种子和 C 工具链构建宿主编译器后，可用同一份白泽源码连续生成三代原生编译器，并逐字节比较产物。原生各代直接生成 ELF。构建命令、验收覆盖和已知限制见[原生后端验收](原生后端验收.md)。
+白泽编译器可直接生成静态 ELF。以 Rust 种子和 C 工具链构建宿主编译器后，可用同一份白泽源码连续生成三代原生编译器，并逐字节比较产物。原生各代直接生成 ELF。Linux x86-64 还支持从手写汇编种子启动，种子可直接编译当前白泽编译器源码。独立验收入口为 bash scripts/check-stage0-cold-start.sh。构建命令、验收覆盖和已知限制见[原生后端验收](原生后端验收.md)。
 
 ## 长期技术路线
 

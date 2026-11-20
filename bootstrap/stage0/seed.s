@@ -1,12 +1,15 @@
 .intel_syntax noprefix
 .global _start
 
-.equ SOURCE_LIMIT, 65536
+.equ SOURCE_LIMIT, 262144
 .equ ELF_BASE, 0x400000
 .equ DATA_BASE, 0x600000
 .equ GLOBAL_LIMIT, 512
+.equ LOCAL_LIMIT, 64
+.equ FUNCTION_LIMIT, 256
+.equ CALL_LIMIT, 16384
 .equ DATA_LIMIT, 16777216
-.equ CODE_CAPACITY, 1048576
+.equ CODE_CAPACITY, DATA_BASE - ELF_BASE
 
 .section .rodata
 target_name: .asciz "native-linux-x64"
@@ -16,6 +19,8 @@ integer_word: .ascii "整数"
 .equ INTEGER_LEN, . - integer_word
 array_word: .ascii "字节数组"
 .equ ARRAY_LEN, . - array_word
+function_word: .ascii "函数"
+.equ FUNCTION_LEN, . - function_word
 if_word: .ascii "如果"
 .equ IF_LEN, . - if_word
 else_word: .ascii "否则"
@@ -38,7 +43,7 @@ builtins:
 builtins_end:
 usage: .ascii "用法：stage0 源文件 输出文件 native-linux-x64\n"
 .equ USAGE_LEN, . - usage
-syntax: .ascii "编译错误：无法解析语句、表达式或变量\n"
+syntax: .ascii "编译错误：无法解析语句、表达式或变量。UTF-8 字节偏移 "
 .equ SYNTAX_LEN, . - syntax
 input_error: .ascii "编译错误：无法读取源码或源码超过容量\n"
 .equ INPUT_ERROR_LEN, . - input_error
@@ -68,6 +73,16 @@ elf_header:
 .lcomm block_depth, 8
 # Global entry: source-name pointer, name length, runtime address, array length (zero for integers).
 .lcomm globals, GLOBAL_LIMIT * 32
+.lcomm inside_function, 8
+.lcomm local_count, 8
+# Same layout as globals. Local integers store their signed frame offset.
+.lcomm locals, LOCAL_LIMIT * 32
+.lcomm function_count, 8
+# Function entry: name pointer, name length, code address (0 before declaration), arity.
+.lcomm functions, FUNCTION_LIMIT * 32
+.lcomm call_count, 8
+# Call entry: rel32 field address, pointer to function entry.
+.lcomm calls, CALL_LIMIT * 16
 
 .section .text
 _start:
@@ -138,6 +153,7 @@ source_complete:
     mov byte ptr [r14 + 1], 0
     add r14, 2
     call emit_exit
+    call resolve_calls
     lea r12, [rip + elf]
     mov r13, r14
     sub r13, r12
@@ -284,30 +300,121 @@ name_done:
     sub r9, r8
     ret
 
-# Return runtime address in rax (-1 if missing), and array length in rdx. Preserve r8/r9.
-lookup_global:
-    lea r10, [rip + globals]
-    xor r11d, r11d
-global_next:
-    cmp r11, [rip + global_count]
-    jae global_missing
+# Generic name lookup. r8/r9 = name, r10 = start, r11 = entry count.
+lookup_entry:
+    test r11, r11
+    jz entry_missing
     cmp r9, [r10 + 8]
-    jne global_step
+    jne entry_step
     mov rdi, [r10]
     mov rsi, r8
     mov rcx, r9
     repe cmpsb
-    je global_found
-global_step:
+    je entry_found
+entry_step:
     add r10, 32
-    inc r11
-    jmp global_next
-global_found:
-    mov rax, [r10 + 16]
-    mov rdx, [r10 + 24]
+    dec r11
+    jmp lookup_entry
+entry_found:
+    mov rax, r10
     ret
-global_missing:
+entry_missing:
+    xor eax, eax
+    ret
+
+lookup_local_entry:
+    lea r10, [rip + locals]
+    mov r11, [rip + local_count]
+    jmp lookup_entry
+
+lookup_global:
+    lea r10, [rip + globals]
+    mov r11, [rip + global_count]
+    call lookup_entry
+    jmp unpack_variable
+
+# Check the function frame's names before looking at global storage.
+lookup_variable:
+    call lookup_local_entry
+    test rax, rax
+    jz lookup_global
+unpack_variable:
+    test rax, rax
+    jz variable_missing
+    mov rdx, [rax + 24]
+    mov rax, [rax + 16]
+    ret
+variable_missing:
     mov rax, -1
+    ret
+
+# Insert a name at the next negative frame offset.
+allocate_local:
+    mov rax, [rip + local_count]
+    cmp rax, LOCAL_LIMIT
+    jae fail_syntax
+    lea r10, [rip + locals]
+    mov rdx, rax
+    shl rdx, 5
+    add r10, rdx
+    mov [r10], r8
+    mov [r10 + 8], r9
+    inc rax
+    mov [rip + local_count], rax
+    neg rax
+    shl rax, 3
+    mov [r10 + 16], rax
+    mov qword ptr [r10 + 24], 0
+    ret
+
+# Call or define a function by source name. A forward reference initially
+# leaves code address and arity unresolved.
+function_entry:
+    lea r10, [rip + functions]
+    mov r11, [rip + function_count]
+    call lookup_entry
+    test rax, rax
+    jnz function_entry_done
+    mov rax, [rip + function_count]
+    cmp rax, FUNCTION_LIMIT
+    jae fail_syntax
+    inc qword ptr [rip + function_count]
+    shl rax, 5
+    lea r10, [rip + functions]
+    add rax, r10
+    mov [rax], r8
+    mov [rax + 8], r9
+    mov qword ptr [rax + 16], 0
+    mov qword ptr [rax + 24], -1
+function_entry_done:
+    ret
+
+# Validate arity both for forward calls and later definitions.
+check_arity:
+    cmp qword ptr [rax + 24], -1
+    jne known_arity
+    mov [rax + 24], rcx
+known_arity:
+    cmp [rax + 24], rcx
+    jne fail_syntax
+    ret
+
+resolve_calls:
+    lea rsi, [rip + calls]
+    mov rdi, [rip + call_count]
+resolve_next:
+    test rdi, rdi
+    jz resolve_done
+    mov rax, [rsi]
+    mov rdx, [rsi + 8]
+    mov rdx, [rdx + 16]
+    test rdx, rdx
+    jz fail_syntax
+    call patch_jump
+    add rsi, 16
+    dec rdi
+    jmp resolve_next
+resolve_done:
     ret
 
 parse_statements:
@@ -334,6 +441,7 @@ statements_done:
     ret
 
 parse_statement:
+    call guard_code
     lea rdi, [rip + integer_word]
     mov ecx, INTEGER_LEN
     call match_word
@@ -344,6 +452,11 @@ parse_statement:
     call match_word
     test eax, eax
     jnz parse_array_declaration
+    lea rdi, [rip + function_word]
+    mov ecx, FUNCTION_LEN
+    call match_word
+    test eax, eax
+    jnz parse_function
     lea rdi, [rip + return_word]
     mov ecx, RETURN_LEN
     call match_word
@@ -365,9 +478,9 @@ parse_statement:
     test eax, eax
     jnz parse_output
     call parse_name
-    call lookup_global
-    test rax, rax
-    js fail_syntax
+    call lookup_variable
+    cmp rax, -1
+    je fail_syntax
     push rax
     test rdx, rdx
     jnz parse_array_assignment
@@ -399,6 +512,8 @@ parse_index:
     ret
 
 parse_declaration:
+    cmp qword ptr [rip + inside_function], 0
+    jne parse_local_declaration
     cmp qword ptr [rip + block_depth], 0
     jne fail_syntax
     call parse_name
@@ -468,6 +583,95 @@ allocate_global:
     mov rax, r11
     ret
 
+parse_local_declaration:
+    call parse_name
+    call lookup_local_entry
+    test rax, rax
+    jnz fail_syntax
+    push r8
+    push r9
+    call parse_initializer
+    pop r9
+    pop r8
+    call allocate_local
+    jmp emit_global_store
+
+parse_function:
+    cmp qword ptr [rip + block_depth], 0
+    jne fail_syntax
+    call parse_name
+    call function_entry
+    cmp qword ptr [rax + 16], 0
+    jne fail_syntax
+    push rax
+    call skip_horizontal
+    cmp eax, '('
+    jne fail_syntax
+    inc r12
+    call skip_horizontal
+    mov qword ptr [rip + local_count], 0
+    xor ecx, ecx
+    cmp eax, ')'
+    je function_parameters_done
+function_parameter:
+    call parse_name
+    call lookup_local_entry
+    test rax, rax
+    jnz fail_syntax
+    call allocate_local
+    call skip_horizontal
+    cmp eax, ','
+    jne function_parameters_done
+    inc r12
+    jmp function_parameter
+function_parameters_done:
+    cmp eax, ')'
+    jne fail_syntax
+    inc r12
+    pop rax
+    mov rcx, [rip + local_count]
+    call check_arity
+    # Main execution skips the inline function body.
+    mov byte ptr [r14], 0xe9
+    lea rdx, [r14 + 1]
+    push rdx
+    add r14, 5
+    mov [rax + 16], r14
+    # push rbp; mov rbp,rsp; sub rsp, LOCAL_LIMIT*8
+    mov dword ptr [r14], 0xe5894855
+    mov dword ptr [r14 + 4], 0x00ec8148
+    mov dword ptr [r14 + 7], LOCAL_LIMIT * 8
+    add r14, 11
+    xor edx, edx
+copy_parameter:
+    cmp rdx, rcx
+    jae parameters_copied
+    mov rax, rcx
+    sub rax, rdx
+    lea rax, [rax * 8 + 8]
+    # mov rax,[rbp+disp32]; mov [rbp+disp32],rax
+    mov dword ptr [r14], 0x00858b48
+    mov [r14 + 3], eax
+    mov dword ptr [r14 + 7], 0x00858948
+    mov rax, rdx
+    not rax
+    shl rax, 3
+    mov [r14 + 10], eax
+    add r14, 14
+    inc rdx
+    jmp copy_parameter
+parameters_copied:
+    mov qword ptr [rip + inside_function], 1
+    call parse_block
+    mov qword ptr [rip + inside_function], 0
+    mov qword ptr [rip + local_count], 0
+    # A function that falls through returns zero.
+    mov dword ptr [r14], 0xc3c9c031
+    add r14, 4
+    pop rax
+    mov rdx, r14
+    jmp patch_jump
+
 parse_block:
     inc qword ptr [rip + block_depth]
     cmp qword ptr [rip + block_depth], 128
@@ -476,8 +680,10 @@ parse_block:
     cmp eax, '{'
     jne fail_syntax
     inc r12
+    push qword ptr [rip + local_count]
     call skip_trivia
     call parse_statements
+    pop qword ptr [rip + local_count]
     cmp eax, '}'
     jne fail_syntax
     inc r12
@@ -552,6 +758,9 @@ parse_output:
     cmp eax, '('
     jne fail_syntax
     inc r12
+    call skip_horizontal
+    cmp eax, '"'
+    je parse_output_text
     call parse_expression
     cmp eax, ')'
     jne fail_syntax
@@ -561,6 +770,71 @@ parse_output:
     # The printed integer occupied one stack slot.
     mov dword ptr [r14], 0x08c48348
     add r14, 4
+    ret
+
+parse_output_text:
+    inc r12
+    mov byte ptr [r14], 0xe9
+    lea r10, [r14 + 1]
+    add r14, 5
+    mov r11, r14
+text_next:
+    call guard_code
+    call peek
+    cmp eax, -1
+    je fail_syntax
+    cmp eax, 10
+    je fail_syntax
+    inc r12
+    cmp eax, '"'
+    je text_done
+    cmp eax, 92
+    jne append_text
+    call peek
+    cmp eax, -1
+    je fail_syntax
+    cmp eax, 10
+    je fail_syntax
+    inc r12
+    cmp eax, 'n'
+    jne text_tab
+    mov eax, 10
+    jmp append_text
+text_tab:
+    cmp eax, 't'
+    jne append_text
+    mov eax, 9
+append_text:
+    mov [r14], al
+    inc r14
+    jmp text_next
+text_done:
+    mov byte ptr [r14], 10
+    inc r14
+    call skip_horizontal
+    cmp eax, ')'
+    jne fail_syntax
+    inc r12
+    mov rax, r10
+    mov rdx, r14
+    call patch_jump
+    # write(1, ELF_BASE + text offset, text length).
+    mov rax, r11
+    lea rdx, [rip + elf]
+    sub rax, rdx
+    add rax, ELF_BASE
+    mov rdx, r14
+    sub rdx, r11
+    mov word ptr [r14], 0xbe48   # movabs rsi,imm64
+    mov [r14 + 2], rax
+    mov byte ptr [r14 + 10], 0xba # mov edx,imm32
+    mov [r14 + 11], edx
+    mov byte ptr [r14 + 15], 0xbf # mov edi,1
+    mov dword ptr [r14 + 16], 1
+    mov byte ptr [r14 + 20], 0xb8 # mov eax,1
+    mov dword ptr [r14 + 21], 1
+    mov word ptr [r14 + 25], 0x050f
+    add r14, 27
     ret
 
 # rax is an offset into the runtime prefix of the generated ELF.
@@ -581,6 +855,13 @@ parse_initializer:
 
 parse_return:
     call parse_expression
+    cmp qword ptr [rip + inside_function], 0
+    je emit_exit
+    # pop rax; leave; ret
+    mov word ptr [r14], 0xc958
+    mov byte ptr [r14 + 2], 0xc3
+    add r14, 3
+    ret
 emit_exit:
     # pop rdi; mov eax, 60; syscall
     mov dword ptr [r14], 0x003cb85f
@@ -589,11 +870,28 @@ emit_exit:
     ret
 
 emit_global_store:
+    test rax, rax
+    js emit_local_store
     # pop rax; mov moffs64,rax
     mov word ptr [r14], 0x4858
     mov byte ptr [r14 + 2], 0xa3
     mov [r14 + 3], rax
     add r14, 11
+    ret
+
+emit_local_store:
+    # pop rax; mov [rbp+disp32],rax
+    mov dword ptr [r14], 0x85894858
+    mov [r14 + 4], eax
+    add r14, 8
+    ret
+
+# Leave room for prologues and for pending control-flow/operand emissions
+# while the enclosing parse calls unwind.
+guard_code:
+    lea rdx, [rip + elf + CODE_CAPACITY - 4096]
+    cmp r14, rdx
+    jae fail_syntax
     ret
 
 # Expr = arithmetic [comparison arithmetic]
@@ -678,17 +976,31 @@ parse_term:
 term_next:
     call skip_horizontal
     cmp eax, '*'
+    je term_operator
+    cmp eax, '/'
     jne peek_done
+term_operator:
+    push rax
     inc r12
     call parse_factor
+    pop rax
+    cmp eax, '/'
+    je emit_divide
     # pop rcx; pop rax; imul rax,rcx; push rax
     mov dword ptr [r14], 0x0f485859
     mov dword ptr [r14 + 4], 0x0050c1af
     add r14, 7
     jmp term_next
+emit_divide:
+    # pop rcx; pop rax; cqo; idiv rcx; push rax
+    mov dword ptr [r14], 0x99485859
+    mov dword ptr [r14 + 4], 0x50f9f748
+    add r14, 8
+    jmp term_next
 
 # Factor = decimal | "-" factor | "(" Expr ")"
 parse_factor:
+    call guard_code
     inc ebp
     cmp ebp, 128
     ja fail_syntax
@@ -737,9 +1049,11 @@ parse_variable:
     call skip_horizontal
     cmp eax, '('
     je parse_builtin_call
-    call lookup_global
+    call lookup_variable
+    cmp rax, -1
+    je fail_syntax
     test rax, rax
-    js fail_syntax
+    js parse_local_value
     test rdx, rdx
     jnz parse_array_value
     # mov rax,moffs64; push rax
@@ -749,12 +1063,20 @@ parse_variable:
     add r14, 11
     jmp factor_done
 
+parse_local_value:
+    # mov rax,[rbp+disp32]; push rax
+    mov dword ptr [r14], 0x00858b48
+    mov [r14 + 3], eax
+    mov byte ptr [r14 + 7], 0x50
+    add r14, 8
+    jmp factor_done
+
 parse_builtin_call:
     lea r10, [rip + builtins]
     lea r11, [rip + builtins_end]
 builtin_next:
     cmp r10, r11
-    jae fail_syntax
+    jae user_call
     cmp r9, [r10 + 8]
     jne builtin_step
     mov rsi, r8
@@ -765,8 +1087,15 @@ builtin_next:
 builtin_step:
     add r10, 32
     jmp builtin_next
+user_call:
+    call function_entry
+    push rax
+    push 1
+    jmp parse_call_arguments
 builtin_found:
     push r10
+    push 0
+parse_call_arguments:
     inc r12
     call skip_horizontal
     xor ecx, ecx
@@ -777,7 +1106,7 @@ builtin_argument:
     call parse_expression
     pop rcx
     inc ecx
-    cmp ecx, 3
+    cmp ecx, LOCAL_LIMIT
     ja fail_syntax
     cmp eax, ','
     jne builtin_arguments_done
@@ -787,18 +1116,37 @@ builtin_arguments_done:
     cmp eax, ')'
     jne fail_syntax
     inc r12
+    pop rax
     pop r10
+    test rax, rax
+    jnz emit_user_call
     cmp rcx, [r10 + 24]
     jne fail_syntax
     mov rax, [r10 + 16]
     call emit_runtime_call
-    # add rsp, nargs * 8; push rax
-    mov word ptr [r14], 0x8348
-    mov byte ptr [r14 + 2], 0xc4
-    mov byte ptr [r14 + 3], cl
-    shl byte ptr [r14 + 3], 3
-    mov byte ptr [r14 + 4], 0x50
+    jmp emit_call_cleanup
+emit_user_call:
+    mov rax, r10
+    call check_arity
+    mov rdx, [rip + call_count]
+    cmp rdx, CALL_LIMIT
+    jae fail_syntax
+    inc qword ptr [rip + call_count]
+    shl rdx, 4
+    lea r10, [rip + calls]
+    add r10, rdx
+    mov byte ptr [r14], 0xe8
+    lea rdx, [r14 + 1]
+    mov [r10], rdx
+    mov [r10 + 8], rax
     add r14, 5
+emit_call_cleanup:
+    # add rsp, nargs * 8; push rax
+    mov dword ptr [r14], 0x00c48148
+    shl ecx, 3
+    mov [r14 + 3], ecx
+    mov byte ptr [r14 + 7], 0x50
+    add r14, 8
     jmp factor_done
 
 parse_array_value:
@@ -850,7 +1198,17 @@ fail_input:
 fail_syntax:
     lea rsi, [rip + syntax]
     mov edx, SYNTAX_LEN
-    jmp fail
+    mov eax, 1
+    mov edi, 2
+    syscall
+    lea rax, [rip + source]
+    mov rdx, r12
+    sub rdx, rax
+    push rdx
+    mov r9d, 2
+    call print_integer
+    mov edi, 1
+    jmp exit
 fail_output:
     lea rsi, [rip + output_error]
     mov edx, OUTPUT_ERROR_LEN
@@ -956,6 +1314,8 @@ runtime_error:
     ret
 
 runtime_output:
+    mov r9d, 1
+print_integer:
     mov rax, [rsp + 8]
     sub rsp, 32
     lea rsi, [rsp + 31]
@@ -982,7 +1342,7 @@ runtime_print_next:
 runtime_print:
     lea rdx, [rsp + 32]
     sub rdx, rsi
-    mov edi, 1
+    mov edi, r9d
     mov eax, 1
     syscall
     add rsp, 32
