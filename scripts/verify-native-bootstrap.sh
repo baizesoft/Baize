@@ -29,6 +29,7 @@ cmp "$work/stage2" "$work/stage3"
 
 # 对实际由原生 ELF 生成的编译器运行完整正负样例。
 bash "$root/scripts/verify-native-linux.sh" "$work/stage3"
+bash "$root/scripts/verify-stage0-boundary.sh" "$work/stage3"
 printf 'PASS: 三代原生白泽编译器逐字节一致\n'
 # 在原生链完成后，用同一源程序对照两个后端的可观察行为。
 cat > "$work/parity.bz" <<'BZ'
