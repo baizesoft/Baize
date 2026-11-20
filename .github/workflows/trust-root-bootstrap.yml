@@ -1,0 +1,30 @@
+name: Independent trust-root bootstrap
+
+on:
+  push:
+    branches: [dev, 'task/baize-trust-root']
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x86-64-trust-root:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rebuild from the checked-in trust root
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-evidence
+          BAIZE_BOOTSTRAP_ARTIFACTS="$PWD/ci-evidence"             bash scripts/check-stage0-trust-root.sh 2>&1 | tee ci-evidence/trust-root.log
+      - name: Upload independent bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: baize-trust-root-linux-x86-64
+          path: ci-evidence/

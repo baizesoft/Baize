@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ $# != 1 || ! -x $1 || $(uname -sm) != 'Linux x86_64' ]]; then
-  printf '用法：bash %s 已有的 Linux x86-64 白泽编译器\n' "$0" >&2
+if [[ $# -lt 1 || $# -gt 2 || ! -x $1 || $(uname -sm) != 'Linux x86_64' ]]; then
+  printf '用法：bash %s 已有的 Linux x86-64 白泽编译器 [预期种子]\n' "$0" >&2
   exit 1
 fi
 host=$(realpath -- "$1")
+expected_seed=
+if [[ $# == 2 ]]; then
+  [[ -f $2 ]]
+  expected_seed=$(realpath -- "$2")
+fi
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
@@ -40,6 +45,10 @@ cmp "$work/seed.o" "$work/seed-repeat.o"
 pack "$work/seed.o" "$work/seed"
 pack "$work/seed-repeat.o" "$work/seed-repeat"
 cmp "$work/seed" "$work/seed-repeat"
+if [[ -n $expected_seed ]]; then
+  cmp "$expected_seed" "$work/seed"
+  printf 'PASS: 白泽汇编和打包重建了相同的可信种子\n'
+fi
 readelf -rW "$work/seed.o" > "$work/relocations"
 grep -q R_X86_64_PC32 "$work/relocations"
 grep -q 'R_X86_64_64 ' "$work/relocations"

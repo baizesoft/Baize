@@ -18,6 +18,10 @@ seed.s 是手写的白泽子集编译器，读取白泽源码并直接生成静�
 
 从已有白泽编译器出发，运行 bash scripts/check-stage0-no-binutils.sh 已有白泽编译器。该流程用白泽汇编器读取原始 seed.s，再用白泽 ELF 打包器构建种子。支持的指令和语法见 bootstrap/stage0/汇编器子集.md。
 
+## 独立可信根冷启动
+
+运行 bash scripts/check-stage0-trust-root.sh，从仓库内固定的可信种子启动，重建种子并复验三代原生自举。该流程从第一步起无需 GNU as、ld、Rust 或 C 编译器。来源、校验和更新方式见 bootstrap/stage0/可信根.md。
+
 ## 当前子集
 
 - UTF-8 源码中的中文标识符和关键字、ASCII 标点、注释及十进制字面量。

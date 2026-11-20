@@ -1,3 +1,4 @@
 scripts/*.sh text eol=lf
 .github/workflows/*.yml text eol=lf
 bootstrap/stage0/*.s text eol=lf
+bootstrap/stage0/trust-root/* text eol=lf
