@@ -23,6 +23,11 @@ jobs:
           mkdir -p ci-evidence
           export BAIZE_BOOTSTRAP_ARTIFACTS="$PWD/ci-evidence"
           bash scripts/check-native-bootstrap.sh 2>&1 | tee ci-evidence/bootstrap.log
+      - name: Build and verify the assembly seed
+        shell: bash
+        run: |
+          set -o pipefail
+          bash scripts/verify-stage0-seed.sh 2>&1 | tee ci-evidence/seed.log
       - name: Upload bootstrap evidence
         if: always()
         uses: actions/upload-artifact@v6
