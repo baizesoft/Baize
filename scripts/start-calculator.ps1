@@ -43,7 +43,14 @@ function Start-BaizeSession {
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
     $start.StandardOutputEncoding = [Text.Encoding]::UTF8
-    $session.Process = [Diagnostics.Process]::Start($start)
+    # Windows PowerShell's stdin writer inherits console encoding and may prepend a BOM.
+    $priorInputEncoding = [Console]::InputEncoding
+    try {
+        [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+        $session.Process = [Diagnostics.Process]::Start($start)
+    } finally {
+        [Console]::InputEncoding = $priorInputEncoding
+    }
     $session.EditDisplay = $false
     if ($memorySlot.SelectedIndex -gt 0) {
         [void](Invoke-BaizeKey ([string][char](106 + $memorySlot.SelectedIndex)))

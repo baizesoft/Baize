@@ -21,6 +21,38 @@ try {
     & (Join-Path $PSScriptRoot 'check-native-windows.ps1') -OutputDirectory $compilerWork
     $compilerPath = Join-Path $compilerWork 'stage3.exe'
     & $buildScript -Source 'examples\计算器.bz' -Name "$stageName/compiler/baize-calculator" -CompilerPath $compilerPath
+    $worker = Join-Path $compilerWork 'baize-calculator.exe'
+    $result = & $worker '(1/3)*3' --expr-text
+    if ($LASTEXITCODE -ne 0 -or $result -cne '1') { throw '计算器 CLI 验收失败' }
+
+    $start = [Diagnostics.ProcessStartInfo]::new($worker, '--serve')
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $priorInputEncoding = [Console]::InputEncoding
+    try {
+        [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+        $session = [Diagnostics.Process]::Start($start)
+    } finally {
+        [Console]::InputEncoding = $priorInputEncoding
+    }
+    try {
+        $response = $session.StandardOutput.ReadToEndAsync()
+        $session.StandardInput.BaseStream.WriteByte(87)
+        $session.StandardInput.Close()
+        if (-not $session.WaitForExit(10000)) {
+            $session.Kill()
+            throw '计算器协议验收超时'
+        }
+        if ($session.ExitCode -ne 0 -or $response.GetAwaiter().GetResult() -cne "0`n0`n0`n0`n") {
+            throw '计算器 W 命令或管道 EOF 验收失败'
+        }
+    } finally {
+        $session.Dispose()
+    }
+    Write-Output 'PASS: 计算器 CLI 和 W 协议验收'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'start-calculator.ps1') -Destination (Join-Path $stage 'Start-Calculator.ps1')
     Copy-Item -LiteralPath (Join-Path $stage 'compiler/baize-calculator.exe') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
