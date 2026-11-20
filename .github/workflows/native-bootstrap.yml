@@ -2,7 +2,7 @@ name: Native bootstrap
 
 on:
   push:
-    branches: [dev, 'task/baize-stage0']
+    branches: [dev, 'task/baize-stage0', 'task/baize-elf-packer']
   pull_request:
     branches: [dev]
   workflow_dispatch:
@@ -48,4 +48,38 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: assembly-cold-start-linux-x86-64
+          path: ci-evidence/
+
+  baize-elf-packer:
+    needs: assembly-cold-start
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: assembly-cold-start-linux-x86-64
+          path: gnu-evidence/
+      - name: Build with the Baize packer and compare to GNU
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          (
+            cd gnu-evidence
+            sha256sum --check SEED-SHA256SUMS
+          )
+          chmod +x gnu-evidence/first-native-compiler
+          export BAIZE_BOOTSTRAP_ARTIFACTS="$PWD/ci-evidence"
+          bash scripts/check-stage0-no-ld.sh "$PWD/gnu-evidence/first-native-compiler" 2>&1 |
+            tee ci-evidence/no-ld.log
+          cmp gnu-evidence/first-native-compiler ci-evidence/first
+          cmp gnu-evidence/native.*/stage3 ci-evidence/native.*/stage3
+          printf 'PASS: 白泽与 GNU 路径的首个编译器及固定点一致\n' |
+            tee -a ci-evidence/no-ld.log
+      - name: Upload linkerless bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: baize-elf-packer-linux-x86-64
           path: ci-evidence/
