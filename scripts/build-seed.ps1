@@ -1,17 +1,55 @@
-﻿param([string]$Source = 'examples\你好.bz', [string]$Name = 'demo')
+﻿param([string]$Source = 'examples\你好.bz', [string]$Name = 'demo', [string]$CompilerPath)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$sourcePath = Join-Path $root $Source
-$build = Join-Path $root 'build'
-New-Item -ItemType Directory -Force $build | Out-Null
-$cPath = Join-Path $build "$Name.c"
-$exePath = Join-Path $build "$Name.exe"
-Push-Location $root
+if ([IO.Path]::IsPathRooted($Source)) {
+    $sourcePath = (Resolve-Path -LiteralPath $Source).Path
+} else {
+    $sourcePath = (Resolve-Path -LiteralPath (Join-Path $root $Source)).Path
+}
+$exePath = Join-Path $root "build/$Name.exe"
+$destination = Split-Path -Parent $exePath
+New-Item -ItemType Directory -Force -Path $destination | Out-Null
+$temporaryOutput = Join-Path $destination ("baize-output-" + [guid]::NewGuid() + ".exe")
+$temporarySeed = $null
+$temporaryCompiler = $null
 try {
-    cargo run --quiet --manifest-path (Join-Path $root 'Cargo.toml') -- $sourcePath $cPath
-    if ($LASTEXITCODE -ne 0) { throw "Rust 种子编译失败：$LASTEXITCODE" }
-    $vcvars = 'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat'
-    $command = "call `"$vcvars`" >nul && cl /nologo /utf-8 /W4 /WX `"build\$Name.c`" /Fo`"build\$Name.obj`" /Fe:`"build\$Name.exe`""
-    & cmd.exe /d /c $command
-    if ($LASTEXITCODE -ne 0) { throw "MSVC C 编译失败：$LASTEXITCODE" }
-} finally { Pop-Location }
+    if ($CompilerPath) {
+        $compiler = (Resolve-Path -LiteralPath $CompilerPath).Path
+    } else {
+        $trust = Join-Path $root 'bootstrap/stage0/trust-root-windows'
+        $seed = Join-Path $trust 'seed.pe'
+        $manifest = (Get-Content -Raw -LiteralPath (Join-Path $trust 'SEED-SHA256SUMS')).Trim()
+        if ($manifest -cnotmatch '^([0-9a-f]{64})  seed\.pe$' -or
+            (Get-FileHash -LiteralPath $seed).Hash -ne $Matches[1]) {
+            throw 'Windows seed verification failed.'
+        }
+        $temporarySeed = Join-Path $destination ("baize-seed-" + [guid]::NewGuid() + ".exe")
+        Copy-Item -LiteralPath $seed -Destination $temporarySeed
+        $compiler = $temporarySeed
+        $compilerSource = Join-Path $root 'compiler/编译器.bz'
+        if ($sourcePath -ne $compilerSource) {
+            $temporaryCompiler = Join-Path $destination ("baize-compiler-" + [guid]::NewGuid() + ".exe")
+            & $temporarySeed $compilerSource $temporaryCompiler native-windows-x64
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temporaryCompiler -PathType Leaf)) {
+                throw "Windows compiler bootstrap failed with exit code $LASTEXITCODE."
+            }
+            $compiler = $temporaryCompiler
+        }
+    }
+    & $compiler $sourcePath $temporaryOutput native-windows-x64
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temporaryOutput -PathType Leaf)) {
+        throw "Windows native compilation failed with exit code $LASTEXITCODE."
+    }
+    Move-Item -LiteralPath $temporaryOutput -Destination $exePath -Force
+} finally {
+    if ($temporarySeed -and (Test-Path -LiteralPath $temporarySeed)) {
+        Remove-Item -LiteralPath $temporarySeed
+    }
+    if ($temporaryCompiler -and (Test-Path -LiteralPath $temporaryCompiler)) {
+        Remove-Item -LiteralPath $temporaryCompiler
+    }
+    if (Test-Path -LiteralPath $temporaryOutput) {
+        Remove-Item -LiteralPath $temporaryOutput
+    }
+}

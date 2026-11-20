@@ -344,4 +344,164 @@ clean_run "$WORK" "$WORK/io.elf" io.in io.out io.missing > "$WORK/io.stdout" || 
 cmp -s "$WORK/expected-io.stdout" "$WORK/io.stdout" || die "文件读写长度或错误返回有误"
 cmp -s "$WORK/expected-io.bin" "$WORK/io.out" || die "二进制文件内容有误"
 
+# 14) stdin 返回原始字节、EOF 与 I/O 错误，stdout 显式刷新。
+STREAM=$WORK/stream.bz
+cat > "$STREAM" <<'BZ'
+整数 字节 = 输入字节()
+当(字节 >= 0) {
+输出(字节)
+如果(输出刷新() != 0) { 返回 1 }
+字节 = 输入字节()
+}
+输出(字节)
+BZ
+compile_native "$STREAM" "$WORK/stream.elf"
+is_static_x64_elf "$WORK/stream.elf" || die "标准流样例未生成有效 ELF"
+chmod +x "$WORK/stream.elf" || die "无法设置 ELF 执行权限"
+printf '\000\032\015\012\377' > "$WORK/stream.in"
+printf '0\n26\n13\n10\n255\n-1\n' > "$WORK/expected-stream"
+clean_run "$WORK" "$WORK/stream.elf" < "$WORK/stream.in" > "$WORK/stream.out" ||
+  die "标准输入样例运行失败"
+cmp -s "$WORK/expected-stream" "$WORK/stream.out" || die "标准输入改变了二进制数据或 EOF"
+cat > "$WORK/stdout-byte.bz" <<'BZ'
+如果(输出字节(-1) != -2) { 返回 1 }
+如果(输出字节(256) != -2) { 返回 2 }
+如果(输出字节(0) != 0) { 返回 3 }
+如果(输出字节(255) != 0) { 返回 4 }
+如果(输出字节(10) != 0) { 返回 5 }
+返回 输出刷新() != 0
+BZ
+compile_native "$WORK/stdout-byte.bz" "$WORK/stdout-byte"
+chmod +x "$WORK/stdout-byte"
+printf '\000\377\012' > "$WORK/stdout-byte.expected"
+clean_run "$WORK" "$WORK/stdout-byte" > "$WORK/stdout-byte.actual" || die "输出字节执行失败"
+cmp "$WORK/stdout-byte.expected" "$WORK/stdout-byte.actual" || die "输出字节未保留原始字节"
+
+printf '%s\n' '-2' > "$WORK/expected-error"
+clean_run "$WORK" "$WORK/stream.elf" < "$WORK" > "$WORK/stream-error.out" ||
+  die "标准输入错误样例运行失败"
+cmp -s "$WORK/expected-error" "$WORK/stream-error.out" || die "输入错误应与 EOF 区分"
+
+# Top-level control blocks use lexical integer slots and can return an exit status.
+cat > "$WORK/top-block.bz" <<'BZ'
+整数 全局 = 9
+整数 次数 = 2
+函数 增一(值) { 返回 值 + 1 }
+当(次数 > 0) {
+  整数 局部 = 增一(次数)
+  如果(次数 == 2) {
+    整数 全局 = 全局 - 1
+    输出(全局 + 局部)
+  } 否则 {
+    整数 全局 = 全局 - 5
+    输出(全局 + 局部)
+  }
+  次数 = 次数 - 1
+}
+输出(全局)
+如果(全局 == 9) {
+  整数 全局 = 全局 + 输入字节()
+  输出(全局)
+  输出(输入字节())
+  整数 状态 = 0
+  返回 状态
+}
+返回 1
+BZ
+compile_native "$WORK/top-block.bz" "$WORK/top-block"
+printf 'AB' > "$WORK/top-block.in"
+run_to_file "$WORK/top-block" "$WORK/top-block.out" < "$WORK/top-block.in"
+printf '%s\n' 11 6 9 74 66 > "$WORK/top-block.expected"
+cmp -s "$WORK/top-block.expected" "$WORK/top-block.out" || die "顶层块局部变量或退出语义不正确"
+
+# 15) Standalone calls preserve side effects and discard results.
+CALLS=$WORK/calls.bz
+cat > "$CALLS" <<'BZ'
+整数 计数 = 0
+函数 累加(步) {
+计数 = 计数 + 步
+返回 777
+}
+函数 包一层(步) {
+累加(步)
+返回 888
+}
+包一层(2)
+当(计数 < 5) { 累加(1) }
+输出(计数)
+累加(累加(1))
+输出(计数)
+BZ
+compile_native "$CALLS" "$WORK/calls.elf"
+run_to_file "$WORK/calls.elf" "$WORK/calls.out"
+printf '5\n783\n' > "$WORK/expected-calls"
+cmp -s "$WORK/expected-calls" "$WORK/calls.out" || die "独立调用没有正确保留副作用或丢弃返回值"
+printf '参数数量() + 1\n' > "$WORK/not-call.bz"
+if clean_run "$WORK" "$COMPILER" "$WORK/not-call.bz" "$WORK/not-call.elf" native-linux-x64; then
+  die "当前语法不应接受孤立算术表达式"
+fi
+[ ! -e "$WORK/not-call.elf" ] || die "语法失败不应留下 ELF"
+
+# 16) Fixed-width bit operations give the same signed view as the C backend.
+BITS=$WORK/bits.bz
+cat > "$BITS" <<'BZ'
+输出(整数位与(255, 15))
+输出(整数位或(240, 15))
+输出(整数位异(255, 15))
+输出(整数位反(0))
+输出(逻辑左移(1, 63))
+输出(逻辑右移(-1, 1))
+输出(逻辑右移(-1, 63))
+输出(逻辑左移(5, 64))
+输出(逻辑右移(-1, -1))
+输出(逻辑左移(-1, 0))
+BZ
+compile_native "$BITS" "$WORK/bits.elf"
+run_to_file "$WORK/bits.elf" "$WORK/bits.out"
+printf '15\n255\n240\n-1\n-9223372036854775808\n9223372036854775807\n1\n0\n0\n-1\n' > "$WORK/expected-bits"
+cmp -s "$WORK/expected-bits" "$WORK/bits.out" || die "64 位逻辑运算或移位语义不符"
+printf '输出(整数位反(1, 2))\n' > "$WORK/bad-bits.bz"
+if clean_run "$WORK" "$COMPILER" "$WORK/bad-bits.bz" "$WORK/bad-bits.elf" native-linux-x64; then
+  die "位运算内置调用必须检查参数数量"
+fi
+[ ! -e "$WORK/bad-bits.elf" ] || die "编译失败不应产生 ELF"
+
+# Locals in sibling blocks reuse names; nested bindings must not escape.
+cat > "$WORK/scope.bz" <<'BZ'
+整数 样值 = 7
+函数 测试(参数) {
+整数 次数 = 0
+当(次数 < 1) {
+整数 数字 = 11
+输出(数字)
+次数 = 次数 + 1
+}
+当(次数 < 2) {
+整数 数字 = 22
+输出(数字)
+次数 = 次数 + 1
+}
+如果(参数 == 1) {
+整数 参数 = 33
+整数 样值 = 44
+参数 = 参数 + 1
+输出(参数)
+输出(样值)
+} 否则 {
+整数 样值 = 55
+输出(样值)
+}
+输出(参数)
+输出(样值)
+返回 0
+}
+测试(1)
+测试(2)
+BZ
+compile_native "$WORK/scope.bz" "$WORK/scope"
+chmod +x "$WORK/scope"
+clean_run "$WORK" "$WORK/scope" > "$WORK/scope.actual" || die "局部作用域用例执行失败"
+printf '%s\n' 11 22 34 44 1 7 11 22 55 2 7 > "$WORK/scope.expected"
+cmp "$WORK/scope.expected" "$WORK/scope.actual" || die "原生局部作用域绑定错误"
+
 printf 'PASS: native-linux-x64 全部断言通过\n'

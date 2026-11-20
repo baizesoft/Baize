@@ -1,9 +1,9 @@
 ﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$previousEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 Push-Location $root
 try {
-    cargo fmt --check
-    cargo test -- --nocapture
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\build-seed.ps1') -Source 'examples\你好.bz' -Name verify_hello
     if ($LASTEXITCODE -ne 0) { throw '问候示例构建失败' }
     $hello = & (Join-Path $root 'build\verify_hello.exe') | Out-String
@@ -12,11 +12,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '额外程序构建失败' }
     $extra = & (Join-Path $root 'build\verify_extra.exe') | Out-String
     if ($extra.Trim() -ne "120") { throw "额外程序输出不符：$extra" }
-    $first = (Get-FileHash (Join-Path $root 'build\verify_extra.c') -Algorithm SHA256).Hash
+    $first = (Get-FileHash (Join-Path $root 'build\verify_extra.exe') -Algorithm SHA256).Hash
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\build-seed.ps1') -Source 'examples\额外程序.bz' -Name verify_extra
     if ($LASTEXITCODE -ne 0) { throw '确定性复建失败' }
-    $second = (Get-FileHash (Join-Path $root 'build\verify_extra.c') -Algorithm SHA256).Hash
-    if ($first -ne $second) { throw '生成 C 不确定' }
+    $second = (Get-FileHash (Join-Path $root 'build\verify_extra.exe') -Algorithm SHA256).Hash
+    if ($first -ne $second) { throw '生成 PE 不确定' }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\build-seed.ps1') -Source 'examples\字节数组.bz' -Name verify_bytes
     if ($LASTEXITCODE -ne 0) { throw '字节数组程序构建失败' }
     $bytes = & (Join-Path $root 'build\verify_bytes.exe') | Out-String
@@ -33,65 +33,53 @@ try {
     if ($LASTEXITCODE -ne 0) { throw '白泽词法器构建失败' }
     $emitSource = '输出（“你好，白泽！”）' + "`n" + '输出（12 + 3 * (4 - 1)）'
     [IO.File]::WriteAllText((Join-Path $root 'build\emit_probe.bz'), $emitSource, [Text.UTF8Encoding]::new($false))
-    $emitResult = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_probe.bz' 'build\emit_probe.c' emit | Out-String
-    if ($emitResult.Trim() -ne '1') { throw "白泽 C 发射失败：$emitResult" }
-    $emitHash1 = (Get-FileHash (Join-Path $root 'build\emit_probe.c') -Algorithm SHA256).Hash
-    & cmd.exe /d /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && cl /nologo /utf-8 /W4 /WX build\emit_probe.c /Fe:build\emit_probe.exe'
-    if ($LASTEXITCODE -ne 0) { throw '白泽生成 C 编译失败' }
+    $emitResult = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_probe.bz' 'build\emit_probe.exe' native-windows-x64 | Out-String
+    if ($emitResult.Trim() -ne '1') { throw "白泽 PE 发射失败：$emitResult" }
+    $emitHash1 = (Get-FileHash (Join-Path $root 'build\emit_probe.exe') -Algorithm SHA256).Hash
     & cmd.exe /d /c 'build\emit_probe.exe > build\emit_probe.out'
     if ($LASTEXITCODE -ne 0) { throw '白泽生成程序运行失败' }
     $emitOutput = [IO.File]::ReadAllText((Join-Path $root 'build\emit_probe.out'), [Text.UTF8Encoding]::new($false))
-    if ($emitOutput -ne "你好，白泽！`r`n21`r`n") { throw "白泽生成程序输出错误：$emitOutput" }
+    if ($emitOutput -ne "你好，白泽！`n21`n") { throw "白泽生成程序输出错误：$emitOutput" }
     $emitVariables = '整数 总数 = 19' + "`n" + '总数 = 总数 + 2' + "`n" + '输出（总数）'
     [IO.File]::WriteAllText((Join-Path $root 'build\emit_variables.bz'), $emitVariables, [Text.UTF8Encoding]::new($false))
-    $emitVariablesResult = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_variables.bz' 'build\emit_variables.c' emit | Out-String
+    $emitVariablesResult = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_variables.bz' 'build\emit_variables.exe' native-windows-x64 | Out-String
     if ($emitVariablesResult.Trim() -ne '1') { throw "白泽变量 AST 发射失败：$emitVariablesResult" }
-    & cmd.exe /d /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && cl /nologo /utf-8 /W4 /WX build\emit_variables.c /Fe:build\emit_variables.exe'
-    if ($LASTEXITCODE -ne 0) { throw '变量程序的生成 C 编译失败' }
     & cmd.exe /d /c 'build\emit_variables.exe > build\emit_variables.out'
     if ($LASTEXITCODE -ne 0) { throw '变量程序的生成物运行失败' }
     $variablesOutput = [IO.File]::ReadAllText((Join-Path $root 'build\emit_variables.out'), [Text.UTF8Encoding]::new($false))
-    if ($variablesOutput -ne "21`r`n") { throw "变量赋值生成物输出错误：$variablesOutput" }
+    if ($variablesOutput -ne "21`n") { throw "变量赋值生成物输出错误：$variablesOutput" }
     $emitArraySource = '字节数组 缓冲[4]' + "`n" + '缓冲[0] = 65' + "`n" + '输出（缓冲[0]）'
     [IO.File]::WriteAllText((Join-Path $root 'build\emit_array.bz'), $emitArraySource, [Text.UTF8Encoding]::new($false))
-    $emitArray = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_array.bz' 'build\emit_array.c' emit | Out-String
-    if ($emitArray.Trim() -ne '1') { throw "字节数组 C 发射失败：$emitArray" }
-    & cmd.exe /d /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && cl /nologo /utf-8 /W4 /WX build\emit_array.c /Fe:build\emit_array.exe'
-    if ($LASTEXITCODE -ne 0) { throw '字节数组生成 C 编译失败' }
+    $emitArray = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_array.bz' 'build\emit_array.exe' native-windows-x64 | Out-String
+    if ($emitArray.Trim() -ne '1') { throw "字节数组 PE 发射失败：$emitArray" }
     & cmd.exe /d /c 'build\emit_array.exe > build\emit_array.out'
     if ($LASTEXITCODE -ne 0) { throw '字节数组生成物运行失败' }
     $arrayOutput = [IO.File]::ReadAllText((Join-Path $root 'build\emit_array.out'), [Text.UTF8Encoding]::new($false))
-    if ($arrayOutput -ne "65`r`n") { throw "数组存储/读取输出错误：$arrayOutput" }
-    $emitFactorial = & (Join-Path $root 'build\verify_lexer.exe') 'examples\额外程序.bz' 'build\emit_factorial.c' emit | Out-String
-    if ($emitFactorial.Trim() -ne '1') { throw "递归函数 C 发射失败：$emitFactorial" }
-    & cmd.exe /d /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && cl /nologo /utf-8 /W4 /WX build\emit_factorial.c /Fe:build\emit_factorial.exe'
-    if ($LASTEXITCODE -ne 0) { throw '递归函数生成 C 编译失败' }
+    if ($arrayOutput -ne "65`n") { throw "数组存储/读取输出错误：$arrayOutput" }
+    $emitFactorial = & (Join-Path $root 'build\verify_lexer.exe') 'examples\额外程序.bz' 'build\emit_factorial.exe' native-windows-x64 | Out-String
+    if ($emitFactorial.Trim() -ne '1') { throw "递归函数 PE 发射失败：$emitFactorial" }
     & cmd.exe /d /c 'build\emit_factorial.exe > build\emit_factorial.out'
     if ($LASTEXITCODE -ne 0) { throw '递归函数生成物运行失败' }
     $factorialOutput = [IO.File]::ReadAllText((Join-Path $root 'build\emit_factorial.out'), [Text.UTF8Encoding]::new($false))
-    if ($factorialOutput -ne "120`r`n") { throw "递归函数/条件分支输出错误：$factorialOutput" }
+    if ($factorialOutput -ne "120`n") { throw "递归函数/条件分支输出错误：$factorialOutput" }
     $emitWhileSource = '整数 i = 1' + "`n" + '整数 total = 0' + "`n" + '当（i < 6） {' + "`n" + 'total = total + i' + "`n" + 'i = i + 1' + "`n" + '}' + "`n" + '输出（total）'
     [IO.File]::WriteAllText((Join-Path $root 'build\emit_while.bz'), $emitWhileSource, [Text.UTF8Encoding]::new($false))
-    $emitWhile = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_while.bz' 'build\emit_while.c' emit | Out-String
-    if ($emitWhile.Trim() -ne '1') { throw "循环 C 发射失败：$emitWhile" }
-    & cmd.exe /d /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && cl /nologo /utf-8 /W4 /WX build\emit_while.c /Fe:build\emit_while.exe'
-    if ($LASTEXITCODE -ne 0) { throw '循环生成 C 编译失败' }
+    $emitWhile = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_while.bz' 'build\emit_while.exe' native-windows-x64 | Out-String
+    if ($emitWhile.Trim() -ne '1') { throw "循环 PE 发射失败：$emitWhile" }
     & cmd.exe /d /c 'build\emit_while.exe > build\emit_while.out'
     if ($LASTEXITCODE -ne 0) { throw '循环生成物运行失败' }
     $whileOutput = [IO.File]::ReadAllText((Join-Path $root 'build\emit_while.out'), [Text.UTF8Encoding]::new($false))
-    if ($whileOutput -ne "15`r`n") { throw "循环生成物输出错误：$whileOutput" }
-    $emitResult2 = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_probe.bz' 'build\emit_probe.c' emit | Out-String
-    $emitHash2 = (Get-FileHash (Join-Path $root 'build\emit_probe.c') -Algorithm SHA256).Hash
-    if ($emitResult2.Trim() -ne '1' -or $emitHash1 -ne $emitHash2) { throw '白泽生成 C 不确定' }
+    if ($whileOutput -ne "15`n") { throw "循环生成物输出错误：$whileOutput" }
+    $emitResult2 = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_probe.bz' 'build\emit_probe.exe' native-windows-x64 | Out-String
+    $emitHash2 = (Get-FileHash (Join-Path $root 'build\emit_probe.exe') -Algorithm SHA256).Hash
+    if ($emitResult2.Trim() -ne '1' -or $emitHash1 -ne $emitHash2) { throw '白泽生成 PE 不确定' }
     [IO.File]::WriteAllText((Join-Path $root 'build\emit_changed.bz'), '输出（22）', [Text.UTF8Encoding]::new($false))
-    $emitChanged = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_changed.bz' 'build\emit_changed.c' emit | Out-String
-    if ($emitChanged.Trim() -ne '1') { throw "不同输入的 C 发射失败：$emitChanged" }
-    & cmd.exe /d /c 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul && cl /nologo /utf-8 /W4 /WX build\emit_changed.c /Fe:build\emit_changed.exe'
-    if ($LASTEXITCODE -ne 0) { throw '不同输入的生成 C 编译失败' }
+    $emitChanged = & (Join-Path $root 'build\verify_lexer.exe') 'build\emit_changed.bz' 'build\emit_changed.exe' native-windows-x64 | Out-String
+    if ($emitChanged.Trim() -ne '1') { throw "不同输入的 PE 发射失败：$emitChanged" }
     & cmd.exe /d /c 'build\emit_changed.exe > build\emit_changed.out'
     if ($LASTEXITCODE -ne 0) { throw '不同输入的生成程序运行失败' }
     $changedOutput = [IO.File]::ReadAllText((Join-Path $root 'build\emit_changed.out'), [Text.UTF8Encoding]::new($false))
-    if ($changedOutput -ne "22`r`n") { throw "输入变化没有改变程序行为：$changedOutput" }
+    if ($changedOutput -ne "22`n") { throw "输入变化没有改变程序行为：$changedOutput" }
     Set-Content (Join-Path $root 'build\lexer_sample.bz') 'alpha "hi" 17 +' -Encoding ascii
     $lexer = @(& (Join-Path $root 'build\verify_lexer.exe') 'build\lexer_sample.bz') -join ','
     if ($lexer -ne '2,5,4,4,1,2,20,1') { throw "白泽词法器输出不符：$lexer" }
@@ -182,5 +170,5 @@ try {
     [IO.File]::WriteAllText((Join-Path $root 'build\lexer_bom.bz'), '如果 alpha', [Text.UTF8Encoding]::new($true))
     $bomTokens = @(& (Join-Path $root 'build\verify_lexer.exe') 'build\lexer_bom.bz') -join ','
     if ($bomTokens -ne '7,6,2,5') { throw "UTF-8 BOM 未跳过：$bomTokens" }
-    Write-Output "种子检查通过；额外程序 C SHA-256：$second"
-} finally { Pop-Location }
+    Write-Output "种子检查通过；额外程序 PE SHA-256：$second"
+} finally { Pop-Location; [Console]::OutputEncoding = $previousEncoding }

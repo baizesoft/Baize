@@ -11,25 +11,6 @@ permissions:
   contents: read
 
 jobs:
-  linux-x86-64:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - name: Build and verify three native generations
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p ci-evidence
-          export BAIZE_BOOTSTRAP_ARTIFACTS="$PWD/ci-evidence"
-          bash scripts/check-native-bootstrap.sh 2>&1 | tee ci-evidence/bootstrap.log
-      - name: Upload bootstrap evidence
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: native-bootstrap-linux-x86-64
-          path: ci-evidence/
-
   assembly-cold-start:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -49,6 +30,86 @@ jobs:
         with:
           name: assembly-cold-start-linux-x86-64
           path: ci-evidence/
+
+  trusted-seed-cold-start:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rebuild and bootstrap from the repository trust root
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          export BAIZE_BOOTSTRAP_ARTIFACTS="$PWD/ci-evidence"
+          bash scripts/check-stage0-trust-root.sh 2>&1 | tee ci-evidence/trust-root.log
+      - name: Cross-build the reference Windows compiler with no toolchain on PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          compilers=(ci-evidence/trust-root.*/native.*/stage3)
+          [[ ${#compilers[@]} -eq 1 && -x ${compilers[0]} ]]
+          env -i PATH= "${compilers[0]}" compiler/编译器.bz ci-evidence/reference-windows.pe native-windows-x64
+      - name: Verify the native ELF calculator
+        shell: bash
+        run: |
+          set -euo pipefail
+          compilers=(ci-evidence/trust-root.*/native.*/stage3)
+          [[ ${#compilers[@]} -eq 1 && -x ${compilers[0]} ]]
+          bash scripts/verify-calculator.sh "${compilers[0]}" 2>&1 |
+            tee ci-evidence/calculator.log
+      - name: Upload independent cold-start evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: trusted-seed-cold-start-linux-x86-64
+          path: ci-evidence/
+
+  native-windows-x64:
+    needs: trusted-seed-cold-start
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          name: trusted-seed-cold-start-linux-x86-64
+          path: linux-evidence/
+      - name: Verify the PE seed and three Windows native generations
+        shell: powershell
+        run: |
+          ./scripts/check-native-windows.ps1 -OutputDirectory "$env:RUNNER_TEMP/baize-native-windows" -ReferenceCompiler linux-evidence/reference-windows.pe
+      - name: Verify native Windows compiler behavior
+        shell: powershell
+        run: ./scripts/verify-seed.ps1
+      - name: Upload bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-bootstrap-windows-x64
+          path: ${{ runner.temp }}/baize-native-windows/
+
+  calculator-windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify the native Windows calculator package
+        shell: powershell
+        run: |
+          $release = "$env:RUNNER_TEMP/BaizeCalculator-win-x64.zip"
+          $repeat = "$env:RUNNER_TEMP/BaizeCalculator-repeat.zip"
+          ./scripts/package-calculator.ps1 -OutputPath $release
+          ./scripts/package-calculator.ps1 -OutputPath $repeat
+          if ((Get-FileHash $release).Hash -ne (Get-FileHash $repeat).Hash) {
+              throw 'Windows calculator packages differ between builds'
+          }
+      - name: Upload verified Windows calculator
+        uses: actions/upload-artifact@v6
+        with:
+          name: BaizeCalculator-win-x64
+          path: ${{ runner.temp }}/BaizeCalculator-win-x64.zip
+          if-no-files-found: error
 
   baize-elf-packer:
     needs: assembly-cold-start

@@ -30,11 +30,8 @@ cmp "$work/stage2" "$work/stage3"
 # 对实际由原生 ELF 生成的编译器运行完整正负样例。
 bash "$root/scripts/verify-native-linux.sh" "$work/stage3"
 bash "$root/scripts/verify-stage0-boundary.sh" "$work/stage3"
+bash "$root/scripts/verify-calculator.sh" "$work/stage3"
 printf 'PASS: 三代原生白泽编译器逐字节一致\n'
-if [[ ${2:-} == --native-only ]]; then
-  exit 0
-fi
-# 在原生链完成后，用同一源程序对照两个后端的可观察行为。
 cat > "$work/parity.bz" <<'BZ'
 函数 阶乘(数) {
 如果(数 <= 1) {
@@ -49,18 +46,15 @@ cat > "$work/parity.bz" <<'BZ'
 次数 = 次数 + 1
 }
 输出(-7 / 3)
+输出(整数位与(整数位反(0), 255))
+输出(逻辑左移(1, 63))
+输出(逻辑右移(-1, 1))
+输出(逻辑右移(-1, 64))
 返回 7
 BZ
-"$work/stage3" "$work/parity.bz" "$work/parity.c" emit
-"${CC:-cc}" "$work/parity.c" -o "$work/parity-c"
 env -i PATH= "$work/stage3" "$work/parity.bz" "$work/parity-elf" native-linux-x64
 chmod +x "$work/parity-elf"
-c_status=0
 elf_status=0
-env -i PATH= "$work/parity-c" > "$work/c.stdout" || c_status=$?
 env -i PATH= "$work/parity-elf" > "$work/elf.stdout" || elf_status=$?
-[[ $c_status == 7 && $elf_status == 7 ]]
-printf '中文\n24\n中文\n120\n-2\n' > "$work/expected.stdout"
-cmp "$work/expected.stdout" "$work/c.stdout"
-cmp "$work/c.stdout" "$work/elf.stdout"
-printf 'PASS: C 与 ELF 后端输出和退出状态一致\n'
+[[ $elf_status == 7 ]]
+printf '中文\n24\n中文\n120\n-2\n255\n-9223372036854775808\n9223372036854775807\n0\n' > "$work/expected.stdout"
