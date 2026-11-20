@@ -9,8 +9,13 @@ fi
 host=$(realpath -- "$1")
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 src="$root/compiler/编译器.bz"
-work=$(mktemp -d)
-trap 'rm -rf -- "$work"' EXIT
+if [[ -n ${BAIZE_BOOTSTRAP_ARTIFACTS:-} ]]; then
+  mkdir -p -- "$BAIZE_BOOTSTRAP_ARTIFACTS"
+  work=$(mktemp -d "$(realpath -- "$BAIZE_BOOTSTRAP_ARTIFACTS")/native.XXXXXX")
+else
+  work=$(mktemp -d)
+  trap 'rm -rf -- "$work"' EXIT
+fi
 
 env -i PATH= "$host" "$src" "$work/stage1" native-linux-x64
 chmod +x "$work/stage1"
@@ -20,7 +25,7 @@ env -i PATH= "$work/stage2" "$src" "$work/stage3" native-linux-x64
 chmod +x "$work/stage3"
 cmp "$work/stage1" "$work/stage2"
 cmp "$work/stage2" "$work/stage3"
-sha256sum "$work"/stage{1,2,3}
+(cd -- "$work" && sha256sum stage{1,2,3}) | tee "$work/SHA256SUMS"
 
 # 对实际由原生 ELF 生成的编译器运行完整正负样例。
 bash "$root/scripts/verify-native-linux.sh" "$work/stage3"

@@ -1,0 +1,31 @@
+name: Native bootstrap
+
+on:
+  push:
+    branches: [dev, 'task/baize-stage0']
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x86-64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify three native generations
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-evidence
+          export BAIZE_BOOTSTRAP_ARTIFACTS="$PWD/ci-evidence"
+          bash scripts/check-native-bootstrap.sh 2>&1 | tee ci-evidence/bootstrap.log
+      - name: Upload bootstrap evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-bootstrap-linux-x86-64
+          path: ci-evidence/
