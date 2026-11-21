@@ -4,10 +4,10 @@
 
 ## 约定
 
-- 本目录由唯一事实源生成：`build/_gen_tests.py`（夹具 + manifest）、`build/_gen_runner.py`（runner）。手工改夹具请同步改生成器，或直接改夹具后仅改夹具。
+- 仓库中受版本控制的 runner、manifest、夹具是复现依据；忽略目录内的本地生成器不能覆盖已审查的修订。
 - 夹具 UTF-8 无 BOM，换行统一 `\n`；期望输出按**字节**比对，末尾换行算入。
 - runner 是 PowerShell 5.1 脚本，**必须带 UTF-8 BOM**（无 BOM 会被 ANSI/GBK 解码导致中文与引号错乱）。
-- 每个用例从 `bootstrap/stage0/trust-root-windows/seed.pe` 经可信链编译（走 `scripts/build-seed.ps1`），不依赖任何高级语言后端。
+- 每轮从 `bootstrap/stage0/trust-root-windows/seed.pe` 构建一次可信编译器（走 `scripts/build-seed.ps1`），用同一编译器执行各用例；引导失败不评估用例。
 - 所有临时产物写入 `build/_bztest_<stamp>/`（已被 `.gitignore` 的 `/build/` 覆盖），不逐文件删除。
 
 ## 运行

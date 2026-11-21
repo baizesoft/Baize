@@ -61,17 +61,20 @@
   {
     "name": "E01_非法表达式应失败",
     "src": "cases/E01_非法表达式应失败.bz",
-    "expect_fail": true
+    "expect_fail": true,
+    "expected_diagnostic": "编译错误：原生后端暂不支持此程序"
   },
   {
     "name": "E02_空程序应失败",
     "src": "cases/E02_空程序应失败.bz",
-    "expect_fail": true
+    "expect_fail": true,
+    "expected_diagnostic": "编译错误：原生后端暂不支持此程序"
   },
   {
     "name": "E03_缺少语句分隔符应失败",
     "src": "cases/E03_缺少语句分隔符应失败.bz",
-    "expect_fail": true
+    "expect_fail": true,
+    "expected_diagnostic": "编译错误：原生后端暂不支持此程序"
   },
   {
     "name": "12_加法溢出回绕",

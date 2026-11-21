@@ -22,7 +22,7 @@
 ## 文档结构（2026-11-21 拆分）
 
 - `README.md` 只保留语言现状速查、自举入口、最小示例与导航（约 10 KB）。计算器完整功能说明在 `docs/计算器使用说明.md`，不要再把大段功能描述堆回 README。
-- 两份生成器 `build/_gen_tests.py`、`build/_gen_runner.py`（被 gitignore）是 `tests/` 夹具与 runner 的唯一事实源；改用例优先改生成器再重新生成，保持 staging 与正式目录一致。
+- 两份本地生成器 `build/_gen_tests.py`、`build/_gen_runner.py`（被 gitignore）是历史工具；以版本控制中的 `tests/` 为准，不得用本地生成器覆盖已审查的 runner 和夹具。
 - 验收脚本（`scripts/check-stage0-trust-root.sh`、`check-native-windows.ps1` 等）改动后必须在对应平台复跑，并把结果回填知识库。
 
 ## 生态联动（2026-11-21 已定义接入约定）

@@ -1,7 +1,7 @@
 ﻿# 白泽语言语义回归 runner（数据驱动）
 # 用法: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-tests.ps1
-# 每个用例：从可信种子经 build-seed.ps1 编译 .bz -> exe，运行并按字节比对期望输出。
-# 负向用例（expect_fail）：断言编译非零退出且不产生 exe。
+# 每轮先从可信种子构建一次编译器；各用例直接调用它。
+# 负向用例断言退出码、精确诊断和产物缺失。
 # 所有临时产物写入 build/_bztest_<stamp>/（已被 gitignore），不逐文件删除。
 $ErrorActionPreference = 'Stop'
 $testDir = $PSScriptRoot
@@ -23,6 +23,15 @@ try {
     $workDir = Join-Path $root "build\_bztest_$stamp"
     New-Item -ItemType Directory -Force -Path $workDir | Out-Null
     $pass = 0; $fail = 0; $results = [System.Collections.Generic.List[string]]::new()
+    $compiler = Join-Path $workDir 'compiler.exe'
+    try {
+        & $buildScript -Source 'compiler/编译器.bz' -Name "_bztest_$stamp/compiler" | Out-Null
+        if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+            throw '未生成编译器'
+        }
+    } catch {
+        throw "BOOTSTRAP_FAILED: $($_.Exception.Message)"
+    }
 
     foreach ($case in $cases) {
         $srcAbs = Join-Path $testDir $case.src
@@ -31,8 +40,10 @@ try {
         $exePath = Join-Path $workDir "$outName.exe"
 
         $psi = New-Object Diagnostics.ProcessStartInfo
-        $psi.FileName = 'powershell'
-        $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -Source "{1}" -Name "{2}"' -f $buildScript, $srcAbs, "_bztest_$stamp/$outName"
+        $psi.FileName = $compiler
+        $psi.Arguments = '"{0}" "{1}" native-windows-x64' -f $srcAbs, $exePath
+        $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
+        $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
@@ -49,12 +60,12 @@ try {
         $exeExists = Test-Path -LiteralPath $exePath
 
         if ($case.expect_fail) {
-            if (-not $exeExists -and $compileRc -ne 0) {
-                $pass++; $results.Add("PASS  $name  [按预期拒绝 rc=$compileRc]")
-            } elseif (-not $exeExists) {
-                $pass++; $results.Add("PASS  $name  [按预期拒绝: 未生成 exe]")
+            $diagnostic = [string]$case.expected_diagnostic
+            if ($diagnostic -and $compileRc -eq 1 -and -not $exeExists -and
+                (($co -split '\r?\n') -ccontains $diagnostic)) {
+                $pass++; $results.Add("PASS  $name  [按预期诊断 rc=$compileRc]")
             } else {
-                $fail++; $results.Add("FAIL  $name  [非法源码却生成了 exe]")
+                $fail++; $results.Add("FAIL  $name  [未命中预期诊断 rc=$compileRc exe=$exeExists] $($co.Trim()) $($ce.Trim())")
             }
             continue
         }
