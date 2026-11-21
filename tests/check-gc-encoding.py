@@ -21,6 +21,7 @@ TASK_ENTRIES = {
     '原生通道接收入口': 'channel_recv', '原生通道取值入口': 'channel_value',
     '原生关闭通道入口': 'channel_close',
     '原生取消任务入口': 'task_cancel', '原生任务结局入口': 'task_outcome',
+    '原生释放任务入口': 'task_release',
 }
 
 
@@ -64,7 +65,8 @@ def check(assembly, emitter, addresses, entries):
 def main():
     gc = check('vector-gc-x64.S', '原生发射向量例行',
                {'原生向量区': 'arena_address', '原生任务区': 'scheduler_address'}, GC_ENTRIES)
-    tasks = check('native-tasks-x64.S', '原生发射任务例行', {'原生任务区': 'task_area_address'}, TASK_ENTRIES)
+    tasks = check('native-tasks-x64.S', '原生发射任务例行',
+                  {'原生任务区': 'task_area_address', '原生工作根起始': 'task_worker_roots_address'}, TASK_ENTRIES)
     for name in ('TASK_ISSUED', 'TASK_RECORDS', 'TASK_STATE', 'TASK_DONE'):
         assert gc[name] == tasks[name], (name, gc[name], tasks[name])
     code = (ROOT / 'compiler/编译器.bz').read_text(encoding='utf-8')
@@ -73,7 +75,10 @@ def main():
     slots = tasks['LIMIT'] + 1
     assert tasks['TASK_ISSUED'] + 8 <= tasks['TASK_CURRENT_STACK_LIMIT'] == 16
     assert tasks['TASK_CURRENT_STACK_LIMIT'] + 8 <= tasks['TASK_RECORDS']
-    assert tasks['TASK_RECORDS'] + 64 * slots <= tasks['MAILBOX']
+    assert gc['WORKER_STRIDE'] == tasks['WORKER_STRIDE']
+    assert tasks['LIMIT'] > 0 and tasks['LIMIT'] & (tasks['LIMIT'] - 1) == 0
+    assert tasks['TASK_RECORDS'] + 64 * slots <= tasks['TASK_HANDLES']
+    assert tasks['TASK_HANDLES'] + 8 * slots <= tasks['MAILBOX']
     assert tasks['MAILBOX'] + 8 * slots <= tasks['CHANNEL_ISSUED']
     assert tasks['CHANNEL_ISSUED'] + 8 <= tasks['CHANNELS']
     assert tasks['CHANNELS'] + 128 * tasks['CHANNEL_LIMIT'] <= tasks['STACKS']

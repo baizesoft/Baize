@@ -1,7 +1,7 @@
 .intel_syntax noprefix
 .text
 .global task_spawn, task_yield, task_wait, task_stack_check, task_area_address
-.global task_cancel, task_outcome
+.global task_cancel, task_outcome, task_release, task_worker_roots_address
 .global channel_new, channel_send, channel_recv, channel_value, channel_close
 .equ LIMIT, 8
 .equ RECORDS, 64
@@ -19,6 +19,8 @@
 .equ TASK_KEY, 48
 .equ TASK_WAKE_ERROR, 56
 .equ TASK_OUTCOME, TASK_WAKE_ERROR   # a retired task can no longer be woken
+.equ TASK_HANDLES, 640              # signed generation-bearing token per slot
+.equ WORKER_STRIDE, 131080          # same as vector-gc-x64.S
 .equ MAILBOX, 1024
 .equ CHANNEL_ISSUED, 1104
 .equ CHANNELS, 1152
@@ -36,16 +38,41 @@ task_spawn:
   call task_area
   cmp qword ptr [r11], 0           # Only the main task starts work in v1.
   jne task_error
-  mov rax, [r11+TASK_ISSUED]
-  cmp rax, LIMIT
-  jae task_error
-  lea rcx, [r11+STACKS]
-  mov rdx, rax
-  shl rdx, 17
-  add rcx, rdx                    # stack's first byte
-  inc rax                         # new task ID
-  mov [r11+TASK_ISSUED], rax
-  mov r10, rax
+  mov edx, 1
+spawn_find:
+  cmp rdx, [r11+TASK_ISSUED]
+  ja spawn_new
+  mov rax, [r11+rdx*8+TASK_HANDLES]
+  test rax, rax
+  jns spawn_next
+  neg rax
+  add rax, LIMIT                  # keep slot bits, advance generation
+  jns spawn_reuse                 # never wrap a handle back into use
+spawn_next:
+  inc edx
+  jmp spawn_find
+spawn_reuse:
+  .byte 0x49, 0xb8                # movabs r8, <worker root base or zero>
+task_worker_roots_address:
+  .quad 0x1234567890abcdef
+  test r8, r8
+  jz spawn_init
+  lea rcx, [rdx-1]
+  imul rcx, rcx, WORKER_STRIDE
+  mov qword ptr [r8+rcx], 0       # clear retired roots before making it live
+  jmp spawn_init
+spawn_new:
+  cmp rdx, LIMIT
+  ja task_error
+  mov [r11+TASK_ISSUED], rdx
+  mov rax, rdx
+spawn_init:
+  mov [r11+rdx*8+TASK_HANDLES], rax
+  mov qword ptr [r11+rdx*8+MAILBOX], 0
+  lea rcx, [rdx-1]
+  shl rcx, 17
+  lea rcx, [r11+rcx+STACKS]
+  mov r10, rdx
   shl r10, 6
   lea r10, [r11+r10+RECORDS]
   lea rdx, [rcx+RED_ZONE]
@@ -54,11 +81,21 @@ task_spawn:
   mov [r10+32], rdx                # fixed, checked function entry
   mov rdx, [rsp+8]
   mov [r10+40], rdx
+  mov qword ptr [r10+16], 0
+  mov qword ptr [r10+TASK_KEY], 0
+  mov qword ptr [r10+TASK_WAKE_ERROR], 0
   add rcx, STACK_BYTES - 72
   lea rdx, [rip+task_begin]
   mov [rcx+64], rdx                # return target after restoring GPRs
   mov [rcx+16], r13
   mov [rcx+24], r12                # process argument base, inherited
+  xor edx, edx
+  mov [rcx], rdx                  # clear prior callee-saved context on reuse
+  mov [rcx+8], rdx
+  mov [rcx+32], rdx
+  mov [rcx+40], rdx
+  mov [rcx+48], rdx
+  mov [rcx+56], rdx
   mov [r10], rcx
   mov qword ptr [r10+TASK_STATE], 1
   ret
@@ -67,19 +104,14 @@ task_wait:
   call task_area
   cmp qword ptr [r11], 0           # v1 forbids waits inside workers.
   jne task_error
-  mov rax, [rsp+8]
-  test rax, rax
-  jz task_error
-  cmp rax, [r11+TASK_ISSUED]
-  ja task_error
 wait_again:
-  mov r10, [rsp+8]
-  shl r10, 6
-  lea r10, [r11+r10+RECORDS]
+  mov rax, [rsp+8]
+  call task_lookup
+  test r10, r10
+  jz task_error
   cmp qword ptr [r10+TASK_STATE], TASK_DONE
   je wait_done
   mov ecx, TASK_JOIN
-  mov rdx, [rsp+8]
   call block_current
   test rax, rax
   jnz wait_result
@@ -187,7 +219,7 @@ yield_ret:
   xor eax, eax
   ret
 
-# ecx=block reason, rdx=channel address or wanted task ID, r11=task area.
+# ecx=block reason, rdx=channel address or wanted task slot, r11=task area.
 block_current:
   call current_record
   mov [r10+TASK_STATE], rcx
@@ -370,13 +402,35 @@ task_outcome:
   mov rax, [r10+TASK_OUTCOME]
 1:
   ret
+
+# Only the main task can release a finished task; keep DONE for GC/scheduling.
+task_release:
+  call task_area
+  cmp qword ptr [r11], 0
+  jne task_error
+  mov rax, [rsp+8]
+  call task_lookup
+  test r10, r10
+  jz task_error
+  cmp qword ptr [r10+TASK_STATE], TASK_DONE
+  jne channel_closed             # -2: live, unchanged
+  neg qword ptr [r11+rdx*8+TASK_HANDLES]
+  xor eax, eax
+  ret
+
+# Decode slot, then compare the entire positive handle before touching a record.
+# Returns r10=record (zero if stale), rdx=physical slot.
 task_lookup:
   xor r10d, r10d
   test rax, rax
-  jz 1f
-  cmp rax, [r11+TASK_ISSUED]
-  ja 1f
-  shl rax, 6
-  lea r10, [r11+rax+RECORDS]
+  jle 1f
+  lea edx, [rax-1]
+  and edx, LIMIT-1
+  inc edx
+  cmp rax, [r11+rdx*8+TASK_HANDLES]
+  jne 1f
+  mov r10, rdx
+  shl r10, 6
+  lea r10, [r11+r10+RECORDS]
 1:
   ret
