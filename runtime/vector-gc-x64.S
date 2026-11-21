@@ -1,10 +1,18 @@
 .intel_syntax noprefix
 .text
-.global allocate, length, read_byte, write_byte, root_add, root_base, root_restore, root_drop, arena_address
+.global allocate, length, read_byte, write_byte, root_add, root_base, root_restore, root_drop, arena_address, scheduler_address
 .equ HEAP, 1048576
 .equ ROOTS, 65536
 .equ ROOT_COUNT, HEAP+8
 .equ ROOT_LIST, ROOT_COUNT+8
+.equ WORKER_ROOTS, 16384
+.equ WORKER_STRIDE, 8+8*WORKER_ROOTS
+.equ WORKER_COUNT, ROOT_LIST+8*ROOTS
+# Native task record ABI (runtime/native-tasks-x64.S).
+.equ TASK_ISSUED, 8
+.equ TASK_RECORDS, 64
+.equ TASK_STATE, 8
+.equ TASK_DONE, 2
 .equ ACTIVE, 0x80000000
 .equ MARK, 0x40000000
 .equ SPAN, 0x3fffffff
@@ -13,29 +21,52 @@ arena:
 arena_address:
   .quad 0x1234567890abcdef
   ret
+scheduler:
+  .byte 0x49, 0xba
+scheduler_address:
+  .quad 0x1234567890abcdef          # zero if tasks were not linked
+  ret
 
-# r11 = base, r10 = logical root count. Only addresses of typed stack slots
-# are registered. Overflow does not write and blocks collection until unwound.
-root_add:
+# Return r9 = active root count address, r8 = that table's physical capacity.
+root_context:
   call arena
-  mov r10, [r11+ROOT_COUNT]
-  cmp r10, ROOTS
-  jae 1f
-  mov [r11+r10*8+ROOT_LIST], rdx
+  call scheduler
+  lea r9, [r11+ROOT_COUNT]
+  mov r8d, ROOTS
+  test r10, r10
+  jz 1f
+  mov r10, [r10]                   # current task slot
+  test r10, r10
+  jz 1f
+  dec r10
+  imul r10, r10, WORKER_STRIDE
+  lea r9, [r11+r10+WORKER_COUNT]
+  mov r8d, WORKER_ROOTS
 1:
-  inc qword ptr [r11+ROOT_COUNT]
+  ret
+
+# Only addresses of typed stack slots are registered. Overflow does not write
+# and blocks collection until the affected task unwinds or retires.
+root_add:
+  call root_context
+  mov r10, [r9]
+  cmp r10, r8
+  jae 1f
+  mov [r9+r10*8+8], rdx
+1:
+  inc qword ptr [r9]
   ret
 root_base:
-  call arena
-  mov rdx, [r11+ROOT_COUNT]
+  call root_context
+  mov rdx, [r9]
   ret
 root_restore:
-  call arena
-  mov [r11+ROOT_COUNT], rdx
+  call root_context
+  mov [r9], rdx
   ret
 root_drop:
-  call arena
-  sub [r11+ROOT_COUNT], rdx
+  call root_context
+  sub [r9], rdx
   ret
 
 # Block: requested length u32, span including header u30, mark + active.
@@ -48,8 +79,6 @@ allocate:
   call try_alloc
   test rax, rax
   jnz alloc_ret
-  cmp qword ptr [r11+ROOT_COUNT], ROOTS
-  ja no_space
   push rdx
   call collect
   pop rdx
@@ -108,12 +137,69 @@ init_block:
   ret
 
 collect:
+  # Do not set any marks until every live table is known to be complete.
+  cmp qword ptr [r11+ROOT_COUNT], ROOTS
+  ja collect_skip
+  push rdi
+  push rsi
+  call scheduler
+  mov rdi, r10
+  test rdi, rdi
+  jz preflight_done
+  mov esi, 1
+preflight_slot:
+  cmp rsi, [rdi+TASK_ISSUED]
+  ja preflight_done
+  call worker_context
+  cmp r8, WORKER_ROOTS
+  ja abandon_collection
+  inc rsi
+  jmp preflight_slot
+preflight_done:
+  lea r9, [r11+ROOT_COUNT]
+  mov r8, [r9]
+  call mark_context
+  test rdi, rdi
+  jz all_marked
+  mov esi, 1
+mark_slot:
+  cmp rsi, [rdi+TASK_ISSUED]
+  ja all_marked
+  call worker_context
+  call mark_context
+  inc rsi
+  jmp mark_slot
+all_marked:
+  pop rsi
+  pop rdi
+  jmp sweep_begin
+abandon_collection:
+  pop rsi
+  pop rdi
+collect_skip:
+  ret
+
+# Return r8=0 for retired stacks: do not inspect stale addresses even after
+# a task was abandoned by its stack guard instead of returning normally.
+worker_context:
+  mov rax, rsi
+  shl rax, 6
+  xor r8d, r8d
+  cmp qword ptr [rdi+rax+TASK_RECORDS+TASK_STATE], TASK_DONE
+  je 1f
+  lea rax, [rsi-1]
+  imul rax, rax, WORKER_STRIDE
+  lea r9, [r11+rax+WORKER_COUNT]
+  mov r8, [r9]
+1:
+  ret
+
+mark_context:
   xor ecx, ecx
-  mov r8, [r11+ROOT_COUNT]
 mark_loop:
   cmp rcx, r8
-  jae sweep_begin
-  mov rdx, [r11+rcx*8+ROOT_LIST]
+  jae mark_done
+  mov rdx, [r9+rcx*8+8]
   mov rdx, [rdx]
   test rdx, rdx
   jz mark_next
@@ -121,6 +207,8 @@ mark_loop:
 mark_next:
   inc rcx
   jmp mark_loop
+mark_done:
+  ret
 sweep_begin:
   lea rax, [r11+8]
   mov r9, [r11]

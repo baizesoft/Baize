@@ -20,7 +20,7 @@ TASK_ENTRIES = {
 }
 
 
-def check(assembly, emitter, area, address_symbol, entries):
+def check(assembly, emitter, addresses, entries):
     with tempfile.TemporaryDirectory(prefix='baize-native-asm-') as folder:
         obj, binary = (Path(folder) / name for name in ('runtime.o', 'runtime.bin'))
         subprocess.run(['as', '--64', '-o', obj, ROOT / 'runtime' / assembly], check=True, timeout=15)
@@ -34,12 +34,14 @@ def check(assembly, emitter, area, address_symbol, entries):
 
     code = (ROOT / 'compiler/编译器.bz').read_text(encoding='utf-8')
     body = code.split(f'函数 {emitter}() {{\n', 1)[1].split('\n返回 1\n}', 1)[0]
+    patches = {f'暂存 = 原生追加整数({area}, 8)': symbol for area, symbol in addresses.items()}
     emitted = bytearray()
     seen = set()
     for line in body.splitlines():
-        if line == f'暂存 = 原生追加整数({area}, 8)':
-            assert len(emitted) == symbols[address_symbol] and 'address' not in seen
-            seen.add('address')
+        if line in patches:
+            symbol = patches[line]
+            assert len(emitted) == symbols[symbol] and symbol not in seen, line
+            seen.add(symbol)
             emitted += ADDRESS
         elif match := re.fullmatch(r'暂存 = 原生追加整数\((\d+), (\d+)\)', line):
             value, size = map(int, match.groups())
@@ -49,14 +51,22 @@ def check(assembly, emitter, area, address_symbol, entries):
             assert end == '原生输出长度' and entry not in seen, line
             assert len(emitted) == symbols[entries[entry]], line
             seen.add(entry)
-    assert seen == entries.keys() | {'address'}, seen
+    assert seen == entries.keys() | set(addresses.values()), seen
     assert emitted == raw, f'{assembly} disagrees with compiler emitter'
     print(f'PASS: {assembly}: {len(raw)} runtime bytes, {len(entries)} native entries, no relocations')
+    return symbols
 
 
 def main():
-    check('vector-gc-x64.S', '原生发射向量例行', '原生向量区', 'arena_address', GC_ENTRIES)
-    check('native-tasks-x64.S', '原生发射任务例行', '原生任务区', 'task_area_address', TASK_ENTRIES)
+    gc = check('vector-gc-x64.S', '原生发射向量例行',
+               {'原生向量区': 'arena_address', '原生任务区': 'scheduler_address'}, GC_ENTRIES)
+    tasks = check('native-tasks-x64.S', '原生发射任务例行', {'原生任务区': 'task_area_address'}, TASK_ENTRIES)
+    for name in ('TASK_ISSUED', 'TASK_RECORDS', 'TASK_STATE', 'TASK_DONE'):
+        assert gc[name] == tasks[name], (name, gc[name], tasks[name])
+    code = (ROOT / 'compiler/编译器.bz').read_text(encoding='utf-8')
+    assert f'整数 原生向量区大小 = {gc["WORKER_COUNT"]}\n' in code
+    assert f'整数 原生工作根区大小 = {gc["WORKER_STRIDE"] * tasks["LIMIT"]}\n' in code
+    print('PASS: collector/scheduler layout and emitted root storage agree')
 
 
 if __name__ == '__main__':

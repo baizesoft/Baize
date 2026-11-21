@@ -6,6 +6,10 @@
 .equ STACKS, 4096
 .equ STACK_BYTES, 131072
 .equ RED_ZONE, 16384
+.equ TASK_ISSUED, 8
+.equ TASK_RECORDS, RECORDS
+.equ TASK_STATE, 8
+.equ TASK_DONE, 2
 # 0=current slot, 8=issued slots. Record: sp/state/result/low/entry/argument.
 task_area:
   .byte 0x49, 0xbb                 # movabs r11, <task-area>
@@ -17,7 +21,7 @@ task_spawn:
   call task_area
   cmp qword ptr [r11], 0           # Only the main task starts work in v1.
   jne task_error
-  mov rax, [r11+8]
+  mov rax, [r11+TASK_ISSUED]
   cmp rax, LIMIT
   jae task_error
   lea rcx, [r11+STACKS]
@@ -25,7 +29,7 @@ task_spawn:
   shl rdx, 17
   add rcx, rdx                    # stack's first byte
   inc rax                         # new task ID
-  mov [r11+8], rax
+  mov [r11+TASK_ISSUED], rax
   mov r10, rax
   shl r10, 6
   lea r10, [r11+r10+RECORDS]
@@ -41,7 +45,7 @@ task_spawn:
   mov [rcx+16], r13
   mov [rcx+24], r12                # process argument base, inherited
   mov [r10], rcx
-  mov qword ptr [r10+8], 1
+  mov qword ptr [r10+TASK_STATE], 1
   ret
 
 task_wait:
@@ -51,13 +55,13 @@ task_wait:
   mov rax, [rsp+8]
   test rax, rax
   jz task_error
-  cmp rax, [r11+8]
+  cmp rax, [r11+TASK_ISSUED]
   ja task_error
 wait_again:
   mov r10, [rsp+8]
   shl r10, 6
   lea r10, [r11+r10+RECORDS]
-  cmp qword ptr [r10+8], 2
+  cmp qword ptr [r10+TASK_STATE], TASK_DONE
   je wait_done
   call .Lyield
   call task_area
@@ -102,18 +106,18 @@ task_finish:
   shl r10, 6
   lea r10, [r11+r10+RECORDS]
   mov [r10+16], rax
-  mov qword ptr [r10+8], 2
+  mov qword ptr [r10+TASK_STATE], TASK_DONE
   # The finished stack is never re-entered; the main slot remains runnable.
 schedule:
   mov rcx, [r11]
   mov rdx, rcx
 find_next:
   inc rdx
-  cmp rdx, [r11+8]
+  cmp rdx, [r11+TASK_ISSUED]
   ja choose_main
   mov r10, rdx
   shl r10, 6
-  cmp qword ptr [r11+r10+RECORDS+8], 1
+  cmp qword ptr [r11+r10+TASK_RECORDS+TASK_STATE], 1
   jne find_next
   jmp have_next
 choose_main:

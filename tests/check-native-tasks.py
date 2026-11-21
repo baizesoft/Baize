@@ -48,8 +48,6 @@ def main():
              '任务入口须为整数到整数的具名函数'),
             ('boolean-handle', '输出(等待任务(真))\n', '实参类型不匹配或数量不符'),
             ('yield-arity', '输出(让出任务(1))\n', '实参类型不匹配或数量不符'),
-            ('task-with-gc', '输出(让出任务())\n输出(向量长度(新建字节向量(1)))\n',
-             '实验性任务尚不能与字节向量混用'),
         ):
             source = root / f'{label}.bz'
             source.write_bytes(text.encode())
