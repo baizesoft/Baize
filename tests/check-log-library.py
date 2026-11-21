@@ -77,8 +77,8 @@ def main():
 
         application = directory / 'line-count.exe'
         launch = [sys.executable, '-B', str(ROOT / 'scripts/baize.py'), 'build',
-                  '--compiler', str(compiler), '--日志', str(ROOT / 'examples/源码行统计.bz'),
-                  '-o', str(application)]
+                  '--compiler', str(compiler), '--日志', '--合入', str(ROOT / 'examples/源码行统计核心.bz'),
+                  str(ROOT / 'examples/源码行统计.bz'), '-o', str(application)]
         compiled = subprocess.run(launch, capture_output=True, timeout=25)
         assert compiled.returncode == 0 and application.is_file(), compiled
         original = application.read_bytes()

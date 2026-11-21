@@ -97,7 +97,8 @@ def main():
         example = project / 'examples/源码行统计.bz'
         artifact = root / 'count-lines.exe'
         result = run([sys.executable, '-B', str(project / 'scripts/baize.py'), 'build',
-                      '--compiler', str(compiler), '--日志', str(example), '-o', str(artifact)])
+                      '--compiler', str(compiler), '--日志', '--合入', str(project / 'examples/源码行统计核心.bz'),
+                      str(example), '-o', str(artifact)])
         assert result.returncode == 0 and artifact.is_file(), result
         for name in ('编译器.bz', '带 空格.bz', '空文件.bz', '缺失.bz'):
             sample = root / name
