@@ -4,3 +4,9 @@ bootstrap/stage0/*.s text eol=lf
 bootstrap/stage0/trust-root/* text eol=lf
 bootstrap/stage0/trust-root-windows/*.pe binary
 bootstrap/stage0/trust-root-windows/SEED-SHA256SUMS text eol=lf
+
+# tests 夹具/期望输出按字节比对，必须保持 LF（core.autocrlf=true 下 clone 不能被转 CRLF）
+tests/** text eol=lf
+docs/** text eol=lf
+AGENTS.md text eol=lf
+README.md text eol=lf

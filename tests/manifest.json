@@ -1,0 +1,101 @@
+[
+  {
+    "name": "01_问候与中文标识符",
+    "src": "cases/01_问候与中文标识符.bz",
+    "expected": "expected/01_问候与中文标识符.txt"
+  },
+  {
+    "name": "02_算术优先级",
+    "src": "cases/02_算术优先级.bz",
+    "expected": "expected/02_算术优先级.txt"
+  },
+  {
+    "name": "03_变量赋值与表达式",
+    "src": "cases/03_变量赋值与表达式.bz",
+    "expected": "expected/03_变量赋值与表达式.txt"
+  },
+  {
+    "name": "04_递归阶乘",
+    "src": "cases/04_递归阶乘.bz",
+    "expected": "expected/04_递归阶乘.txt"
+  },
+  {
+    "name": "05_当循环累加",
+    "src": "cases/05_当循环累加.bz",
+    "expected": "expected/05_当循环累加.txt"
+  },
+  {
+    "name": "06_零迭代求和",
+    "src": "cases/06_零迭代求和.bz",
+    "expected": "expected/06_零迭代求和.txt"
+  },
+  {
+    "name": "07_字节数组读写",
+    "src": "cases/07_字节数组读写.bz",
+    "expected": "expected/07_字节数组读写.txt"
+  },
+  {
+    "name": "08_负数恒等函数",
+    "src": "cases/08_负数恒等函数.bz",
+    "expected": "expected/08_负数恒等函数.txt"
+  },
+  {
+    "name": "09_比较与布尔条件",
+    "src": "cases/09_比较与布尔条件.bz",
+    "expected": "expected/09_比较与布尔条件.txt"
+  },
+  {
+    "name": "10_命令行参数",
+    "src": "cases/10_命令行参数.bz",
+    "expected": "expected/10_命令行参数.txt",
+    "args": [
+      "Alpha",
+      "beta"
+    ]
+  },
+  {
+    "name": "11_文件读写往返",
+    "src": "cases/11_文件读写往返.bz",
+    "expected": "expected/11_文件读写往返.txt"
+  },
+  {
+    "name": "E01_非法表达式应失败",
+    "src": "cases/E01_非法表达式应失败.bz",
+    "expect_fail": true
+  },
+  {
+    "name": "E02_空程序应失败",
+    "src": "cases/E02_空程序应失败.bz",
+    "expect_fail": true
+  },
+  {
+    "name": "E03_缺少语句分隔符应失败",
+    "src": "cases/E03_缺少语句分隔符应失败.bz",
+    "expect_fail": true
+  },
+  {
+    "name": "12_加法溢出回绕",
+    "src": "cases/12_加法溢出回绕.bz",
+    "expected": "expected/12_加法溢出回绕.txt"
+  },
+  {
+    "name": "13_乘法溢出回绕",
+    "src": "cases/13_乘法溢出回绕.bz",
+    "expected": "expected/13_乘法溢出回绕.txt"
+  },
+  {
+    "name": "14_除法负数双向向零截断",
+    "src": "cases/14_除法负数双向向零截断.bz",
+    "expected": "expected/14_除法负数双向向零截断.txt"
+  },
+  {
+    "name": "C01_除零应崩溃",
+    "src": "crash/C01_除零应崩溃.bz",
+    "expect_crash": true
+  },
+  {
+    "name": "C02_INT_MIN除负一应崩溃",
+    "src": "crash/C02_INT_MIN除负一应崩溃.bz",
+    "expect_crash": true
+  }
+]
