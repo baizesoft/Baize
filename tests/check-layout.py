@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tempfile
 
 
@@ -92,11 +93,12 @@ def main():
             assert result.returncode == 1 and not artifact.exists() and result.stdout == expected, (label, result)
             print('PASS:', label)
 
-        example = Path(__file__).resolve().parents[1] / 'examples/源码行统计.bz'
-        result, artifact = compile_source('count-lines', example.read_text(encoding='utf-8'))
+        project = Path(__file__).resolve().parents[1]
+        example = project / 'examples/源码行统计.bz'
+        artifact = root / 'count-lines.exe'
+        result = run([sys.executable, '-B', str(project / 'scripts/baize.py'), 'build',
+                      '--compiler', str(compiler), '--日志', str(example), '-o', str(artifact)])
         assert result.returncode == 0 and artifact.is_file(), result
-        if not windows:
-            artifact.chmod(artifact.stat().st_mode | stat.S_IXUSR)
         for name in ('编译器.bz', '带 空格.bz', '空文件.bz', '缺失.bz'):
             sample = root / name
             if name == '编译器.bz':
