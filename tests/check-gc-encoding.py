@@ -20,6 +20,7 @@ TASK_ENTRIES = {
     '原生新建通道入口': 'channel_new', '原生通道发送入口': 'channel_send',
     '原生通道接收入口': 'channel_recv', '原生通道取值入口': 'channel_value',
     '原生关闭通道入口': 'channel_close',
+    '原生取消任务入口': 'task_cancel', '原生任务结局入口': 'task_outcome',
 }
 
 

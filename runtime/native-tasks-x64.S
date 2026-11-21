@@ -1,6 +1,7 @@
 .intel_syntax noprefix
 .text
 .global task_spawn, task_yield, task_wait, task_stack_check, task_area_address
+.global task_cancel, task_outcome
 .global channel_new, channel_send, channel_recv, channel_value, channel_close
 .equ LIMIT, 8
 .equ RECORDS, 64
@@ -16,6 +17,7 @@
 .equ TASK_JOIN, 5
 .equ TASK_KEY, 48
 .equ TASK_WAKE_ERROR, 56
+.equ TASK_OUTCOME, TASK_WAKE_ERROR   # a retired task can no longer be woken
 .equ MAILBOX, 1024
 .equ CHANNEL_ISSUED, 1104
 .equ CHANNELS, 1152
@@ -101,6 +103,7 @@ stack_ok:
   ret
 stack_exhausted:
   mov rax, -2
+  mov ecx, 3
   jmp task_finish
 
 task_yield:
@@ -116,11 +119,13 @@ task_begin:
   call [r10+32]
   add rsp, 8
   call task_area
+  mov ecx, 1
 task_finish:
   mov r10, [r11]
   shl r10, 6
   lea r10, [r11+r10+RECORDS]
   mov [r10+16], rax
+  mov [r10+TASK_OUTCOME], rcx
   mov qword ptr [r10+TASK_STATE], TASK_DONE
   # Only the main task can join, and only the matching completion wakes it.
   cmp qword ptr [r11+RECORDS+TASK_STATE], TASK_JOIN
@@ -334,4 +339,48 @@ channel_invalid:
   ret
 channel_closed:
   mov rax, -2
+  ret
+
+# Only the main task can cancel. It owns the thread at this point, so the
+# target cannot be executing. Retire it before the next scheduling/GC point.
+task_cancel:
+  call task_area
+  cmp qword ptr [r11], 0
+  jne task_error
+  mov rax, [rsp+8]
+  call task_lookup
+  test r10, r10
+  jz task_error
+  cmp qword ptr [r10+TASK_STATE], TASK_DONE
+  je already_retired
+  mov qword ptr [r10+TASK_KEY], 0
+  mov qword ptr [r10+16], -4
+  mov qword ptr [r10+TASK_OUTCOME], 2
+  mov qword ptr [r10+TASK_STATE], TASK_DONE
+  xor eax, eax
+  ret
+already_retired:
+  mov eax, 1
+  ret
+task_outcome:
+  call task_area
+  mov rax, [rsp+8]
+  call task_lookup
+  test r10, r10
+  jz task_error
+  xor eax, eax
+  cmp qword ptr [r10+TASK_STATE], TASK_DONE
+  jne 1f
+  mov rax, [r10+TASK_OUTCOME]
+1:
+  ret
+task_lookup:
+  xor r10d, r10d
+  test rax, rax
+  jz 1f
+  cmp rax, [r11+TASK_ISSUED]
+  ja 1f
+  shl rax, 6
+  lea r10, [r11+rax+RECORDS]
+1:
   ret
