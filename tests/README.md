@@ -16,7 +16,9 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-tests.ps1
 ```
 
-成功输出 `TOTAL=N PASS=N FAIL=0`，进程退出码 0；任一失败退出码 1。
+成功输出 `TOTAL=N PASS=N FAIL=0`，进程退出码 0；任一失败退出码 1。负向用例须返回 1、无产物，并在 stdout 命中 `expected_diagnostic` 指定的完整诊断行。
+
+Linux 使用同一个 manifest：从可信根脚本的保留证据取得第三代编译器后，运行 `python3 -B tests/run-linux-tests.py <stage3>`。两个平台的布局验收另跑 `python3 -B tests/check-layout.py <第三代编译器路径>`。用于确认 Windows 引导故障不会产生假通过的对照是 `python3 -B tests/check-runner-fail-closed.py`。Python 只用于测试驱动，不参与自举或用户程序编译。
 
 ## 用例清单
 
@@ -38,8 +40,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-tests.ps1
 ## 新增用例
 
 1. 在 `cases/` 加 `<名字>.bz`；
-2. 正向用例在 `expected/` 加同名 `.txt`（期望 stdout，**末尾要有换行**）；负向用例不建 expected，在 manifest 里标 `expect_fail: true`；
-3. 在 `manifest.json` 追加一条：`{"name":"<名字>","src":"cases/<名字>.bz","expected":"expected/<名字>.txt"}`（负向用 `"expect_fail":true` 替代 expected；需要参数时加 `"args":["..."]`）；
+2. 正向用例在 `expected/` 加同名 `.txt`（期望 stdout，**末尾要有换行**）；负向用例不建 expected，在 manifest 里标 `expect_fail: true` 和 `expected_diagnostic`；
+3. 在 `manifest.json` 追加用例（需要参数时加 `"args":["..."]`）；
 4. 重跑 runner，全绿即合入。
 
 > [!note] 档位说明
