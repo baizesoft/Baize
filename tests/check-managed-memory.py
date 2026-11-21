@@ -19,7 +19,12 @@ def main():
         root = Path(directory)
         control = root / 'control.bz'
         control.write_bytes('输出(17)\n'.encode())
-        for label, source in (('control', control), ('vector', CASES / 'M01_动态向量长度.bz')):
+        for label, source, expected in (
+            ('control', control, b'17\n'),
+            ('vector', CASES / 'M01_动态向量长度.bz', b'17\n0\n23\n-1\n-1\n1048504\n-1\n'),
+            ('checked-access', CASES / 'M02_动态向量受检读写.bz',
+             b'0\n0\n0\n-1\n-1\n-1\n-1\n-1\n-1\n255\n9\n1\n-1\n-1\n-1\n-1\n-1\n'),
+        ):
             artifact = root / f'{label}.exe'
             compiled = subprocess.run([str(compiler), str(source), str(artifact), native],
                                       capture_output=True, timeout=20)
@@ -30,7 +35,7 @@ def main():
             if os.name != 'nt':
                 artifact.chmod(0o700)
             execution = subprocess.run([str(artifact)], capture_output=True, timeout=15)
-            expected = b'17\n' if label == 'control' else b'17\n0\n23\n-1\n-1\n1048504\n-1\n'
+
             assert (execution.returncode, execution.stdout, execution.stderr) == (0, expected, b''), execution
             print('PASS:', label, flush=True)
         if args.baseline:
@@ -42,6 +47,10 @@ def main():
         for label, text in (
             ('integer-as-reference', '输出(向量长度(17))\n'),
             ('boolean-as-size', '输出(向量长度(新建字节向量(真)))\n'),
+            ('read-integer-reference', '输出(向量读字节(17, 0))\n'),
+            ('read-boolean-index', '输出(向量读字节(新建字节向量(1), 真))\n'),
+            ('write-boolean-value', '输出(向量写字节(新建字节向量(1), 0, 真))\n'),
+            ('write-arity', '输出(向量写字节(新建字节向量(1), 0))\n'),
         ):
             source = root / f'{label}.bz'
             source.write_bytes(text.encode())
