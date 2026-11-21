@@ -71,6 +71,8 @@ def main():
     assert f'整数 原生向量区大小 = {gc["WORKER_COUNT"]}\n' in code
     assert f'整数 原生工作根区大小 = {gc["WORKER_STRIDE"] * tasks["LIMIT"]}\n' in code
     slots = tasks['LIMIT'] + 1
+    assert tasks['TASK_ISSUED'] + 8 <= tasks['TASK_CURRENT_STACK_LIMIT'] == 16
+    assert tasks['TASK_CURRENT_STACK_LIMIT'] + 8 <= tasks['TASK_RECORDS']
     assert tasks['TASK_RECORDS'] + 64 * slots <= tasks['MAILBOX']
     assert tasks['MAILBOX'] + 8 * slots <= tasks['CHANNEL_ISSUED']
     assert tasks['CHANNEL_ISSUED'] + 8 <= tasks['CHANNELS']

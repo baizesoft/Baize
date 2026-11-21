@@ -9,6 +9,7 @@
 .equ STACK_BYTES, 131072
 .equ RED_ZONE, 16384
 .equ TASK_ISSUED, 8
+.equ TASK_CURRENT_STACK_LIMIT, 16
 .equ TASK_RECORDS, RECORDS
 .equ TASK_STATE, 8
 .equ TASK_DONE, 2
@@ -23,7 +24,8 @@
 .equ CHANNELS, 1152
 .equ CHANNEL_LIMIT, 8
 .equ CHANNEL_CAPACITY, 8
-# 0=current slot, 8=issued slots. Record: sp/state/result/low/entry/argument/key/wake-error.
+# 0=current slot, 8=issued slots, 16=current stack limit (zero for main).
+# Record: sp/state/result/low/entry/argument/key/wake-error.
 task_area:
   .byte 0x49, 0xbb                 # movabs r11, <task-area>
 task_area_address:
@@ -93,15 +95,7 @@ task_error:
 
 task_stack_check:
   call task_area
-  mov r10, [r11]
-  test r10, r10
-  jz stack_ok
-  shl r10, 6
-  cmp rsp, [r11+r10+RECORDS+24]
-  jb stack_exhausted
-stack_ok:
-  ret
-stack_exhausted:
+  # Only reached by the generated guard's taken branch, not a call.
   mov rax, -2
   mov ecx, 3
   jmp task_finish
@@ -178,6 +172,8 @@ have_next:
   mov [r11+rcx+RECORDS], rsp
   mov [r11], rdx
   shl rdx, 6
+  mov r10, [r11+rdx+RECORDS+24]
+  mov [r11+TASK_CURRENT_STACK_LIMIT], r10
   mov rsp, [r11+rdx+RECORDS]
   pop r15
   pop r14
