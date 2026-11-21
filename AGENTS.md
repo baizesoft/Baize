@@ -6,6 +6,13 @@
 - 编译器源码在 `compiler/编译器.bz`。最终编译器必须由白泽自身实现，不依赖 Rust、Go、Python、C 等第三方高级语言；Stage 0 汇编种子与外部汇编器/链接器属于明确记录的过渡依赖，不得误称最终自主工具链。
 - 自举验收以三代逐字节比对、可信根哈希、GNU/交叉独立对照为准。先定义契约和验收标准再编码；不以语法示例或愿景文案宣称完成。未实际复跑验收脚本时，"通过"只能算 B 档自述，交付时必须说明。
 
+## 白泽团队协作
+
+- Agent 接手入口见 [.agents/README.md](.agents/README.md)。
+- `.baize/` 是白泽团队的多人协作目录。[knowledge](.baize/knowledge/README.md) 存放知识，[task](.baize/task/README.md) 存放任务，[memory](.baize/memory/README.md) 存放共享记忆。
+- `.baize/` 由 Git 跟踪。更新后按本仓分支约定提交并推送，让协作者能从远端获取。凭据、原始客户资料和个人会话留在各自的授权存储中。
+
+
 ## 知识库配对
 
 - 配对知识库：`E:\notes\baize_notes\BaizeLang\`，入口 `00-总索引.md`。接手前先读它，进度事实以 `01-进度存档.md` 为唯一真源。
