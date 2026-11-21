@@ -21,7 +21,7 @@ def main():
         control.write_bytes('输出(17)\n'.encode())
         for label, source, expected in (
             ('control', control, b'17\n'),
-            ('vector', CASES / 'M01_动态向量长度.bz', b'17\n0\n23\n-1\n-1\n1048504\n-1\n'),
+            ('vector', CASES / 'M01_动态向量长度.bz', b'17\n0\n23\n-1\n-1\n1048504\n0\n-1\n1\n'),
             ('checked-access', CASES / 'M02_动态向量受检读写.bz',
              b'0\n0\n0\n-1\n-1\n-1\n-1\n-1\n-1\n255\n9\n1\n-1\n-1\n-1\n-1\n-1\n'),
         ):
@@ -35,7 +35,6 @@ def main():
             if os.name != 'nt':
                 artifact.chmod(0o700)
             execution = subprocess.run([str(artifact)], capture_output=True, timeout=15)
-
             assert (execution.returncode, execution.stdout, execution.stderr) == (0, expected, b''), execution
             print('PASS:', label, flush=True)
         if args.baseline:
