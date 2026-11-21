@@ -17,6 +17,9 @@ GC_ENTRIES = {
 TASK_ENTRIES = {
     '原生启动任务入口': 'task_spawn', '原生等待任务入口': 'task_wait',
     '原生任务栈检查入口': 'task_stack_check', '原生让出任务入口': 'task_yield',
+    '原生新建通道入口': 'channel_new', '原生通道发送入口': 'channel_send',
+    '原生通道接收入口': 'channel_recv', '原生通道取值入口': 'channel_value',
+    '原生关闭通道入口': 'channel_close',
 }
 
 
@@ -66,6 +69,12 @@ def main():
     code = (ROOT / 'compiler/编译器.bz').read_text(encoding='utf-8')
     assert f'整数 原生向量区大小 = {gc["WORKER_COUNT"]}\n' in code
     assert f'整数 原生工作根区大小 = {gc["WORKER_STRIDE"] * tasks["LIMIT"]}\n' in code
+    slots = tasks['LIMIT'] + 1
+    assert tasks['TASK_RECORDS'] + 64 * slots <= tasks['MAILBOX']
+    assert tasks['MAILBOX'] + 8 * slots <= tasks['CHANNEL_ISSUED']
+    assert tasks['CHANNEL_ISSUED'] + 8 <= tasks['CHANNELS']
+    assert tasks['CHANNELS'] + 128 * tasks['CHANNEL_LIMIT'] <= tasks['STACKS']
+    assert 40 + 8 * tasks['CHANNEL_CAPACITY'] <= 128
     print('PASS: collector/scheduler layout and emitted root storage agree')
 
 
